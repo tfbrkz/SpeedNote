@@ -15,6 +15,7 @@ type FeedbackState = {
 type LeaderboardEntry = {
   id: string;
   name: string;
+  mode: ClefMode | "unknown";
   totalSets: number;
   totalCorrect: number;
   averageTimePerNoteMs: number;
@@ -81,21 +82,36 @@ function loadLeaderboardEntries(): LeaderboardEntry[] {
   }
 
   try {
-    const parsed = JSON.parse(storedValue) as LeaderboardEntry[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(storedValue) as Array<Partial<LeaderboardEntry>>;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((entry) => typeof entry.id === "string" && typeof entry.name === "string")
+      .map((entry) => ({
+        id: entry.id as string,
+        name: entry.name as string,
+        mode: entry.mode === "treble" || entry.mode === "bass" || entry.mode === "mixed" ? entry.mode : "unknown",
+        totalSets: typeof entry.totalSets === "number" ? entry.totalSets : 0,
+        totalCorrect: typeof entry.totalCorrect === "number" ? entry.totalCorrect : 0,
+        averageTimePerNoteMs: typeof entry.averageTimePerNoteMs === "number" ? entry.averageTimePerNoteMs : 0,
+        createdAtMs: typeof entry.createdAtMs === "number" ? entry.createdAtMs : Date.now()
+      }));
   } catch {
     return [];
   }
 }
 
 function generateNoteSet(mode: ClefMode, notesPerSet: number): GeneratedNote[] {
-  const firstNote = generateNote(mode);
-  const notes: GeneratedNote[] = [firstNote];
-
-  for (let index = 1; index < notesPerSet; index += 1) {
-    notes.push(generateNote(firstNote.clef));
+  if (mode === "mixed") {
+    return Array.from({ length: notesPerSet }, () => generateNote("mixed"));
   }
 
+  const notes: GeneratedNote[] = [];
+  for (let index = 0; index < notesPerSet; index += 1) {
+    notes.push(generateNote(mode));
+  }
   return notes;
 }
 
@@ -148,6 +164,7 @@ function App() {
   const [lastResponseTimeMs, setLastResponseTimeMs] = useState(0);
   const [locked, setLocked] = useState(false);
   const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>(() => loadLeaderboardEntries());
+  const [leaderboardModeFilter, setLeaderboardModeFilter] = useState<ClefMode | "all">("all");
   const [leaderboardName, setLeaderboardName] = useState("");
   const [leaderboardNameError, setLeaderboardNameError] = useState<string | null>(null);
   const [hasSubmittedRound, setHasSubmittedRound] = useState(false);
@@ -483,6 +500,11 @@ function App() {
       }).slice(0, LEADERBOARD_MAX_ENTRIES),
     [leaderboardEntries]
   );
+  const filteredLeaderboard = useMemo(
+    () =>
+      sortedLeaderboard.filter((entry) => leaderboardModeFilter === "all" || entry.mode === leaderboardModeFilter),
+    [leaderboardModeFilter, sortedLeaderboard]
+  );
 
   const handleLeaderboardSubmit = useCallback(() => {
     const trimmedName = leaderboardName.trim();
@@ -499,6 +521,7 @@ function App() {
     const entry: LeaderboardEntry = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       name: trimmedName,
+      mode,
       totalSets: completedSets,
       totalCorrect: correct,
       averageTimePerNoteMs: averageResponseMs,
@@ -516,7 +539,7 @@ function App() {
     });
     setHasSubmittedRound(true);
     setLeaderboardNameError(null);
-  }, [averageResponseMs, completedSets, correct, hasSubmittedRound, leaderboardEligible, leaderboardName, roundEnded]);
+  }, [averageResponseMs, completedSets, correct, hasSubmittedRound, leaderboardEligible, leaderboardName, mode, roundEnded]);
 
   return (
     <main className="page-layout">
@@ -630,20 +653,36 @@ function App() {
       </section>
 
       <section className="leaderboard-panel" aria-label="Leaderboard">
-        <h3>Leaderboard</h3>
-        {sortedLeaderboard.length === 0 ? (
+        <div className="leaderboard-header-row">
+          <h3>Leaderboard</h3>
+          <label className="leaderboard-filter">
+            <span>Mode</span>
+            <select
+              value={leaderboardModeFilter}
+              onChange={(event) => setLeaderboardModeFilter(event.target.value as ClefMode | "all")}
+            >
+              <option value="all">All</option>
+              <option value="treble">Treble</option>
+              <option value="bass">Bass</option>
+              <option value="mixed">Mixed</option>
+            </select>
+          </label>
+        </div>
+        {filteredLeaderboard.length === 0 ? (
           <p className="leaderboard-empty">No scores submitted yet.</p>
         ) : (
           <div className="leaderboard-table">
             <div className="leaderboard-row leaderboard-header">
               <span>Name</span>
+              <span>Mode</span>
               <span>Total sets</span>
               <span>Total correct</span>
               <span>Avg time / note</span>
             </div>
-            {sortedLeaderboard.map((entry) => (
+            {filteredLeaderboard.map((entry) => (
               <div key={entry.id} className="leaderboard-row">
                 <span>{entry.name}</span>
+                <span>{entry.mode === "unknown" ? "-" : entry.mode}</span>
                 <span>{entry.totalSets}</span>
                 <span>{entry.totalCorrect}</span>
                 <span>{(entry.averageTimePerNoteMs / 1000).toFixed(2)}s</span>
