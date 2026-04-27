@@ -98,11 +98,52 @@ h1 {
   color: #374151;
 }
 
-.audio-debug {
-  margin: 0 0 0.8rem;
-  font-size: 0.78rem;
-  color: #6b7280;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+.leaderboard-submit {
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  border-radius: 12px;
+  padding: 0.7rem 0.85rem;
+  margin-bottom: 0.9rem;
+}
+
+.leaderboard-submit h3 {
+  margin: 0 0 0.2rem;
+  font-size: 1rem;
+}
+
+.leaderboard-submit p {
+  margin: 0 0 0.6rem;
+  font-size: 0.86rem;
+  color: #374151;
+}
+
+.leaderboard-submit-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.leaderboard-submit-row input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+}
+
+.leaderboard-submit-row button {
+  border: 1px solid #2563eb;
+  border-radius: 10px;
+  background: #2563eb;
+  color: #ffffff;
+  padding: 0.45rem 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.leaderboard-submit-row button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .session-btn {
@@ -251,6 +292,45 @@ h1 {
   background: #fef2f2;
 }
 
+.leaderboard-panel {
+  margin-top: 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 0.8rem;
+  background: #ffffff;
+}
+
+.leaderboard-panel h3 {
+  margin: 0 0 0.55rem;
+  font-size: 1rem;
+}
+
+.leaderboard-empty {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #6b7280;
+}
+
+.leaderboard-table {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.leaderboard-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 2fr) repeat(3, minmax(90px, 1fr));
+  gap: 0.45rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 0.86rem;
+}
+
+.leaderboard-header {
+  font-weight: 700;
+  background: #f1f5f9;
+}
+
 @media (max-width: 840px) {
   .score-panel {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -262,5 +342,9 @@ h1 {
 
   .answers-panel {
     grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  .leaderboard-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

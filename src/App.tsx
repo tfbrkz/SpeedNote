@@ -3,7 +3,7 @@ import { AnswerButtons } from "./components/AnswerButtons";
 import { ScoreTracker } from "./components/ScoreTracker";
 import { StaffDisplay } from "./components/StaffDisplay";
 import { generateNote, type ClefMode, type GeneratedNote, type NoteLetter } from "./lib/noteGenerator";
-import { playPianoNote, subscribeAudioDebug, type AudioDebugState, warmPianoSamples } from "./lib/pianoPlayer";
+import { playPianoNote, warmPianoSamples } from "./lib/pianoPlayer";
 
 type FeedbackState = {
   revealAnswer: boolean;
@@ -11,10 +11,34 @@ type FeedbackState = {
   message: string;
 };
 
+type LeaderboardEntry = {
+  id: string;
+  name: string;
+  totalSets: number;
+  totalCorrect: number;
+  averageTimePerNoteMs: number;
+  createdAtMs: number;
+};
+
 const NOTES_PER_SET_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 const DEFAULT_MODE: ClefMode = "treble";
 const DEFAULT_NOTES_PER_SET = 4;
 const DEFAULT_NUMBER_OF_SETS = 5;
+const LEADERBOARD_STORAGE_KEY = "speednote-leaderboard-v1";
+
+function loadLeaderboardEntries(): LeaderboardEntry[] {
+  const storedValue = window.localStorage.getItem(LEADERBOARD_STORAGE_KEY);
+  if (!storedValue) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(storedValue) as LeaderboardEntry[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 function generateNoteSet(mode: ClefMode, notesPerSet: number): GeneratedNote[] {
   const firstNote = generateNote(mode);
@@ -48,13 +72,9 @@ function App() {
   const [elapsedNow, setElapsedNow] = useState(() => Date.now());
   const [lastResponseTimeMs, setLastResponseTimeMs] = useState(0);
   const [locked, setLocked] = useState(false);
-  const [audioDebug, setAudioDebug] = useState<AudioDebugState>({
-    path: "idle",
-    noteLabel: null,
-    contextState: "none",
-    samplesReady: false,
-    timestampMs: null
-  });
+  const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>(() => loadLeaderboardEntries());
+  const [leaderboardName, setLeaderboardName] = useState("");
+  const [hasSubmittedRound, setHasSubmittedRound] = useState(false);
   const nextSetTimeoutRef = useRef<number | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState>({
     revealAnswer: false,
@@ -97,6 +117,8 @@ function App() {
       setCorrectNotesSolved(0);
       setPendingFailedTimeMs(0);
       setLocked(false);
+      setHasSubmittedRound(false);
+      setLeaderboardName("");
       setCurrentNotes(generateNoteSet(nextMode, notesPerSet));
       setCurrentNoteIndex(0);
       setNoteStartedAt(Date.now());
@@ -124,6 +146,8 @@ function App() {
       setCorrectNotesSolved(0);
       setPendingFailedTimeMs(0);
       setLocked(false);
+      setHasSubmittedRound(false);
+      setLeaderboardName("");
       setCurrentNotes(generateNoteSet(mode, count));
       setCurrentNoteIndex(0);
       setNoteStartedAt(Date.now());
@@ -151,6 +175,8 @@ function App() {
       setCorrectNotesSolved(0);
       setPendingFailedTimeMs(0);
       setLocked(false);
+      setHasSubmittedRound(false);
+      setLeaderboardName("");
       setCurrentNotes(generateNoteSet(mode, notesPerSet));
       setCurrentNoteIndex(0);
       setNoteStartedAt(Date.now());
@@ -199,6 +225,8 @@ function App() {
       setCorrectNotesSolved(0);
       setPendingFailedTimeMs(0);
       setCompletedSets(0);
+      setHasSubmittedRound(false);
+      setLeaderboardName("");
     }
 
     // Always start from a fresh set so users cannot pre-solve before pressing Start.
@@ -339,10 +367,8 @@ function App() {
   }, [gameRunning, handleAnswer, locked]);
 
   useEffect(() => {
-    return subscribeAudioDebug((state) => {
-      setAudioDebug(state);
-    });
-  }, []);
+    window.localStorage.setItem(LEADERBOARD_STORAGE_KEY, JSON.stringify(leaderboardEntries));
+  }, [leaderboardEntries]);
 
   useEffect(() => {
     return () => {
@@ -365,6 +391,36 @@ function App() {
   }, [elapsedNow, lastResponseTimeMs, locked, noteStartedAt]);
 
   const averageResponseMs = correctNotesSolved > 0 ? totalCorrectResponseTimeMs / correctNotesSolved : 0;
+  const roundEnded = !gameRunning && completedSets >= numberOfSets;
+  const sortedLeaderboard = useMemo(
+    () =>
+      [...leaderboardEntries].sort((left, right) => {
+        if (left.averageTimePerNoteMs === right.averageTimePerNoteMs) {
+          return left.createdAtMs - right.createdAtMs;
+        }
+        return left.averageTimePerNoteMs - right.averageTimePerNoteMs;
+      }),
+    [leaderboardEntries]
+  );
+
+  const handleLeaderboardSubmit = useCallback(() => {
+    const trimmedName = leaderboardName.trim();
+    if (!trimmedName || !roundEnded || hasSubmittedRound) {
+      return;
+    }
+
+    const entry: LeaderboardEntry = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: trimmedName,
+      totalSets: completedSets,
+      totalCorrect: correct,
+      averageTimePerNoteMs: averageResponseMs,
+      createdAtMs: Date.now()
+    };
+
+    setLeaderboardEntries((value) => [...value, entry]);
+    setHasSubmittedRound(true);
+  }, [averageResponseMs, completedSets, correct, hasSubmittedRound, leaderboardName, roundEnded]);
 
   return (
     <main className="app-shell">
@@ -385,11 +441,26 @@ function App() {
           Sets: {completedSets}/{numberOfSets}
         </span>
       </div>
-      <p className="audio-debug">
-        Audio debug: {audioDebug.path} | ctx: {audioDebug.contextState} | ready:{" "}
-        {audioDebug.samplesReady ? "yes" : "no"} | note: {audioDebug.noteLabel ?? "-"} | ts:{" "}
-        {audioDebug.timestampMs ? new Date(audioDebug.timestampMs).toLocaleTimeString() : "-"}
-      </p>
+
+      {roundEnded && (
+        <section className="leaderboard-submit">
+          <h3>Round Complete</h3>
+          <p>Submit this score to the leaderboard.</p>
+          <div className="leaderboard-submit-row">
+            <input
+              type="text"
+              value={leaderboardName}
+              onChange={(event) => setLeaderboardName(event.target.value)}
+              placeholder="Enter name"
+              maxLength={24}
+              disabled={hasSubmittedRound}
+            />
+            <button type="button" onClick={handleLeaderboardSubmit} disabled={hasSubmittedRound || !leaderboardName.trim()}>
+              {hasSubmittedRound ? "Submitted" : "Submit"}
+            </button>
+          </div>
+        </section>
+      )}
 
       <details className="settings-panel" open={settingsOpen} onToggle={(event) => setSettingsOpen(event.currentTarget.open)}>
         <summary>Settings {settingsOpen ? "▼" : "▶"}</summary>
@@ -444,6 +515,30 @@ function App() {
           revealAnswer={feedback.revealAnswer}
           onAnswer={handleAnswer}
         />
+      </section>
+
+      <section className="leaderboard-panel" aria-label="Leaderboard">
+        <h3>Leaderboard</h3>
+        {sortedLeaderboard.length === 0 ? (
+          <p className="leaderboard-empty">No scores submitted yet.</p>
+        ) : (
+          <div className="leaderboard-table">
+            <div className="leaderboard-row leaderboard-header">
+              <span>Name</span>
+              <span>Total sets</span>
+              <span>Total correct</span>
+              <span>Avg time / note</span>
+            </div>
+            {sortedLeaderboard.map((entry) => (
+              <div key={entry.id} className="leaderboard-row">
+                <span>{entry.name}</span>
+                <span>{entry.totalSets}</span>
+                <span>{entry.totalCorrect}</span>
+                <span>{(entry.averageTimePerNoteMs / 1000).toFixed(2)}s</span>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <p className={`feedback ${feedbackClass}`}>{feedback.message}</p>
