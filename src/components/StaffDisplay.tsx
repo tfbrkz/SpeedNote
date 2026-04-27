@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Beam, Formatter, Renderer, Stave, StaveNote, Voice } from "vexflow";
 import type { Clef, GeneratedNote } from "../lib/noteGenerator";
 
@@ -14,13 +14,36 @@ function renderClefLabel(clef: Clef) {
 export function StaffDisplay({ notes, activeNoteIndex }: StaffDisplayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const firstNote = notes[0] ?? { clef: "treble" as Clef };
+  const [availableWidth, setAvailableWidth] = useState(460);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) {
+        return;
+      }
+      setAvailableWidth(entry.contentRect.width);
+    });
+
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current || notes.length === 0) {
       return;
     }
 
-    const width = 460 + Math.max(0, notes.length - 1) * 70;
+    const idealWidth = 460 + Math.max(0, notes.length - 1) * 70;
+    const minimumWidth = 300;
+    const width = Math.max(minimumWidth, Math.min(idealWidth, Math.floor(availableWidth)));
     const height = 210;
     const container = containerRef.current;
     container.innerHTML = "";
@@ -53,10 +76,11 @@ export function StaffDisplay({ notes, activeNoteIndex }: StaffDisplayProps) {
     voice.addTickables(staveNotes);
     const beams = Beam.generateBeams(staveNotes);
 
-    new Formatter().joinVoices([voice]).format([voice], width - 120);
+    // If many notes are present, justify to available width to tighten spacing.
+    new Formatter().joinVoices([voice]).format([voice], Math.max(140, width - 120));
     voice.draw(context, stave);
     beams.forEach((beam) => beam.setContext(context).draw());
-  }, [activeNoteIndex, firstNote?.clef, notes]);
+  }, [activeNoteIndex, availableWidth, firstNote?.clef, notes]);
 
   return (
     <section className="staff-panel" aria-live="polite">

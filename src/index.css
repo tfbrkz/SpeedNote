@@ -142,7 +142,7 @@ h1 {
 
 .staff-canvas {
   width: 100%;
-  overflow-x: auto;
+  overflow: hidden;
 }
 
 .answers-panel {
