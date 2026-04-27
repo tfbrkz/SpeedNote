@@ -25,6 +25,52 @@ const DEFAULT_MODE: ClefMode = "treble";
 const DEFAULT_NOTES_PER_SET = 4;
 const DEFAULT_NUMBER_OF_SETS = 5;
 const LEADERBOARD_STORAGE_KEY = "speednote-leaderboard-v1";
+const LEADERBOARD_MAX_ENTRIES = 10;
+const ADSENSE_CLIENT_ID = import.meta.env.VITE_ADSENSE_CLIENT_ID as string | undefined;
+const ADSENSE_LEFT_SLOT_ID = import.meta.env.VITE_ADSENSE_LEFT_SLOT_ID as string | undefined;
+const ADSENSE_RIGHT_SLOT_ID = import.meta.env.VITE_ADSENSE_RIGHT_SLOT_ID as string | undefined;
+
+type AdRailProps = {
+  slotId?: string;
+  label: string;
+};
+
+function AdRail({ slotId, label }: AdRailProps) {
+  useEffect(() => {
+    if (!ADSENSE_CLIENT_ID || !slotId) {
+      return;
+    }
+
+    try {
+      const ads = (window as Window & { adsbygoogle?: unknown[] }).adsbygoogle ?? [];
+      ads.push({});
+      (window as Window & { adsbygoogle?: unknown[] }).adsbygoogle = ads;
+    } catch {
+      // Ad blockers and script-loading failures are non-fatal.
+    }
+  }, [slotId]);
+
+  if (!ADSENSE_CLIENT_ID || !slotId) {
+    return (
+      <aside className="ad-rail ad-placeholder" aria-label={`${label} ad space`}>
+        <span>{label} ad space</span>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="ad-rail" aria-label={`${label} advertisement`}>
+      <ins
+        className="adsbygoogle"
+        style={{ display: "block", width: "160px", height: "600px" }}
+        data-ad-client={ADSENSE_CLIENT_ID}
+        data-ad-slot={slotId}
+        data-ad-format="auto"
+        data-full-width-responsive="false"
+      />
+    </aside>
+  );
+}
 
 function loadLeaderboardEntries(): LeaderboardEntry[] {
   const storedValue = window.localStorage.getItem(LEADERBOARD_STORAGE_KEY);
@@ -392,6 +438,7 @@ function App() {
 
   const averageResponseMs = correctNotesSolved > 0 ? totalCorrectResponseTimeMs / correctNotesSolved : 0;
   const roundEnded = !gameRunning && completedSets >= numberOfSets;
+  const leaderboardEligible = completedSets >= 5 && correct === completedSets;
   const sortedLeaderboard = useMemo(
     () =>
       [...leaderboardEntries].sort((left, right) => {
@@ -399,13 +446,13 @@ function App() {
           return left.createdAtMs - right.createdAtMs;
         }
         return left.averageTimePerNoteMs - right.averageTimePerNoteMs;
-      }),
+      }).slice(0, LEADERBOARD_MAX_ENTRIES),
     [leaderboardEntries]
   );
 
   const handleLeaderboardSubmit = useCallback(() => {
     const trimmedName = leaderboardName.trim();
-    if (!trimmedName || !roundEnded || hasSubmittedRound) {
+    if (!trimmedName || !roundEnded || hasSubmittedRound || !leaderboardEligible) {
       return;
     }
 
@@ -418,20 +465,30 @@ function App() {
       createdAtMs: Date.now()
     };
 
-    setLeaderboardEntries((value) => [...value, entry]);
+    setLeaderboardEntries((value) => {
+      const nextEntries = [...value, entry].sort((left, right) => {
+        if (left.averageTimePerNoteMs === right.averageTimePerNoteMs) {
+          return left.createdAtMs - right.createdAtMs;
+        }
+        return left.averageTimePerNoteMs - right.averageTimePerNoteMs;
+      });
+      return nextEntries.slice(0, LEADERBOARD_MAX_ENTRIES);
+    });
     setHasSubmittedRound(true);
-  }, [averageResponseMs, completedSets, correct, hasSubmittedRound, leaderboardName, roundEnded]);
+  }, [averageResponseMs, completedSets, correct, hasSubmittedRound, leaderboardEligible, leaderboardName, roundEnded]);
 
   return (
-    <main className="app-shell">
-      <h1>Piano Sight-Reading Trainer</h1>
-      <ScoreTracker
-        streak={streak}
-        correct={correct}
-        incorrect={incorrect}
-        currentNoteElapsedMs={currentNoteElapsedMs}
-        averageResponseMs={averageResponseMs}
-      />
+    <main className="page-layout">
+      <AdRail label="Left" slotId={ADSENSE_LEFT_SLOT_ID} />
+      <section className="app-shell">
+        <h1>PianoSight - improve your sight reading</h1>
+        <ScoreTracker
+          streak={streak}
+          correct={correct}
+          incorrect={incorrect}
+          currentNoteElapsedMs={currentNoteElapsedMs}
+          averageResponseMs={averageResponseMs}
+        />
 
       <div className="session-row">
         <button type="button" className="session-btn" onClick={handleStartStop}>
@@ -445,7 +502,11 @@ function App() {
       {roundEnded && (
         <section className="leaderboard-submit">
           <h3>Round Complete</h3>
-          <p>Submit this score to the leaderboard.</p>
+          <p>
+            {leaderboardEligible
+              ? "Submit this score to the leaderboard."
+              : "Leaderboard requires at least 5 sets and a perfect run (correct sets must equal total sets)."}
+          </p>
           <div className="leaderboard-submit-row">
             <input
               type="text"
@@ -453,9 +514,13 @@ function App() {
               onChange={(event) => setLeaderboardName(event.target.value)}
               placeholder="Enter name"
               maxLength={24}
-              disabled={hasSubmittedRound}
+              disabled={hasSubmittedRound || !leaderboardEligible}
             />
-            <button type="button" onClick={handleLeaderboardSubmit} disabled={hasSubmittedRound || !leaderboardName.trim()}>
+            <button
+              type="button"
+              onClick={handleLeaderboardSubmit}
+              disabled={hasSubmittedRound || !leaderboardEligible || !leaderboardName.trim()}
+            >
               {hasSubmittedRound ? "Submitted" : "Submit"}
             </button>
           </div>
@@ -541,7 +606,9 @@ function App() {
         )}
       </section>
 
-      <p className={`feedback ${feedbackClass}`}>{feedback.message}</p>
+        <p className={`feedback ${feedbackClass}`}>{feedback.message}</p>
+      </section>
+      <AdRail label="Right" slotId={ADSENSE_RIGHT_SLOT_ID} />
     </main>
   );
 }
