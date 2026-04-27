@@ -41,7 +41,7 @@ h1 {
 
 .score-panel {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 0.5rem;
   margin-bottom: 1rem;
 }
@@ -67,6 +67,28 @@ h1 {
   display: flex;
   gap: 0.55rem;
   margin-bottom: 1rem;
+}
+
+.set-size-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.set-size-row span {
+  font-size: 0.86rem;
+  color: #374151;
+  font-weight: 600;
+}
+
+.set-size-row select {
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0.45rem 0.6rem;
+  font-weight: 600;
 }
 
 .mode-row button,
@@ -171,7 +193,7 @@ h1 {
 
 @media (max-width: 840px) {
   .score-panel {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .trainer-grid {

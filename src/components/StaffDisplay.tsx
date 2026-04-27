@@ -1,24 +1,26 @@
 import { useEffect, useRef } from "react";
-import { Formatter, Renderer, Stave, StaveNote, Voice } from "vexflow";
+import { Beam, Formatter, Renderer, Stave, StaveNote, Voice } from "vexflow";
 import type { Clef, GeneratedNote } from "../lib/noteGenerator";
 
 type StaffDisplayProps = {
-  note: GeneratedNote;
+  notes: GeneratedNote[];
+  activeNoteIndex: number;
 };
 
 function renderClefLabel(clef: Clef) {
   return clef === "treble" ? "Treble Clef" : "Bass Clef";
 }
 
-export function StaffDisplay({ note }: StaffDisplayProps) {
+export function StaffDisplay({ notes, activeNoteIndex }: StaffDisplayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const firstNote = notes[0] ?? { clef: "treble" as Clef };
 
   useEffect(() => {
-    if (!containerRef.current) {
+    if (!containerRef.current || notes.length === 0) {
       return;
     }
 
-    const width = 460;
+    const width = 460 + Math.max(0, notes.length - 1) * 70;
     const height = 210;
     const container = containerRef.current;
     container.innerHTML = "";
@@ -30,30 +32,41 @@ export function StaffDisplay({ note }: StaffDisplayProps) {
     context.setFont("Arial", 10);
 
     const stave = new Stave(20, 40, width - 40);
-    stave.addClef(note.clef);
+    stave.addClef(firstNote.clef);
     stave.setContext(context);
     stave.draw();
 
-    const staveNote = new StaveNote({
-      clef: note.clef,
-      keys: [note.key],
-      duration: "q"
+    const staveNotes = notes.map((note, index) => {
+      const staveNote = new StaveNote({
+        clef: note.clef,
+        keys: [note.key],
+        duration: note.duration
+      });
+      if (index === activeNoteIndex) {
+        staveNote.setStyle({ fillStyle: "#2563eb", strokeStyle: "#2563eb" });
+      }
+      return staveNote;
     });
 
-    const voice = new Voice({ numBeats: 1, beatValue: 4 });
-    voice.addTickables([staveNote]);
+    const voice = new Voice({ numBeats: 4, beatValue: 4 });
+    voice.setStrict(false);
+    voice.addTickables(staveNotes);
+    const beams = Beam.generateBeams(staveNotes);
 
     new Formatter().joinVoices([voice]).format([voice], width - 120);
     voice.draw(context, stave);
-  }, [note]);
+    beams.forEach((beam) => beam.setContext(context).draw());
+  }, [activeNoteIndex, firstNote?.clef, notes]);
 
   return (
     <section className="staff-panel" aria-live="polite">
       <div className="staff-header">
-        <h2>Identify this note</h2>
-        <p>{renderClefLabel(note.clef)}</p>
+        <h2>Identify these notes in order</h2>
+        <p>
+          {renderClefLabel(firstNote.clef)} - Note {Math.min(activeNoteIndex + 1, notes.length)} of {notes.length}
+        </p>
       </div>
-      <div ref={containerRef} className="staff-canvas" aria-label={`Note on ${renderClefLabel(note.clef)}`} />
+      <div ref={containerRef} className="staff-canvas" aria-label={`Notes on ${renderClefLabel(firstNote.clef)}`} />
     </section>
   );
 }

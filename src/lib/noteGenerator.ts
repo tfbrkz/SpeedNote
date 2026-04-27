@@ -1,12 +1,14 @@
 export type ClefMode = "treble" | "bass" | "mixed";
 export type Clef = "treble" | "bass";
 export type NoteLetter = "A" | "B" | "C" | "D" | "E" | "F" | "G";
+export type NoteDuration = "w" | "h" | "q" | "8";
 
 export type GeneratedNote = {
   clef: Clef;
   key: string;
   letter: NoteLetter;
   label: string;
+  duration: NoteDuration;
 };
 
 const TREBLE_RANGE = ["E4", "F4", "G4", "A4", "B4", "C5", "D5", "E5", "F5"] as const;
@@ -33,6 +35,11 @@ function chooseClef(mode: ClefMode): Clef {
   return mode;
 }
 
+function chooseDuration(): NoteDuration {
+  const durations: NoteDuration[] = ["q", "8", "h", "w"];
+  return durations[randomIndex(durations.length)];
+}
+
 export function generateNote(mode: ClefMode): GeneratedNote {
   const clef = chooseClef(mode);
   const range = clef === "treble" ? TREBLE_RANGE : BASS_RANGE;
@@ -42,6 +49,7 @@ export function generateNote(mode: ClefMode): GeneratedNote {
     clef,
     key: pitchToVexflowKey(pitch),
     letter: pitchToLetter(pitch),
-    label: pitch
+    label: pitch,
+    duration: chooseDuration()
   };
 }
