@@ -1,19 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { Beam, Formatter, GhostNote, Renderer, Stave, StaveConnector, StaveNote, Voice } from "vexflow";
 import type { Clef, GeneratedNote } from "../lib/noteGenerator";
+import type { NoteResultState } from "../hooks/useSpeedNoteSession";
 
 type StaffDisplayProps = {
   notes: GeneratedNote[];
   activeNoteIndex: number;
+  showGrandStaff?: boolean;
+  noteResults?: NoteResultState[];
 };
 
 const ACTIVE_NOTE_COLOR = "#8b5cf6";
+const CORRECT_NOTE_COLOR = "#22c55e";
+const WRONG_NOTE_COLOR = "#ef4444";
 
 function renderClefLabel(clef: Clef) {
   return clef === "treble" ? "Treble Clef" : "Bass Clef";
 }
 
-export function StaffDisplay({ notes, activeNoteIndex }: StaffDisplayProps) {
+export function StaffDisplay({ notes, activeNoteIndex, showGrandStaff = false, noteResults = [] }: StaffDisplayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const firstNote = notes[0] ?? { clef: "treble" as Clef };
   const [availableWidth, setAvailableWidth] = useState(460);
@@ -45,7 +50,7 @@ export function StaffDisplay({ notes, activeNoteIndex }: StaffDisplayProps) {
 
     const idealWidth = 460 + Math.max(0, notes.length - 1) * 70;
     const width = Math.min(idealWidth, Math.max(120, Math.floor(availableWidth)));
-    const hasBothClefs = notes.some((note) => note.clef === "treble") && notes.some((note) => note.clef === "bass");
+    const hasBothClefs = showGrandStaff || (notes.some((note) => note.clef === "treble") && notes.some((note) => note.clef === "bass"));
     const height = hasBothClefs ? 280 : 210;
     const container = containerRef.current;
     container.innerHTML = "";
@@ -68,7 +73,12 @@ export function StaffDisplay({ notes, activeNoteIndex }: StaffDisplayProps) {
           keys: [note.key],
           duration: note.duration
         });
-        if (index === activeNoteIndex) {
+        const result = noteResults[index];
+        if (result === "correct") {
+          staveNote.setStyle({ fillStyle: CORRECT_NOTE_COLOR, strokeStyle: CORRECT_NOTE_COLOR });
+        } else if (result === "wrong") {
+          staveNote.setStyle({ fillStyle: WRONG_NOTE_COLOR, strokeStyle: WRONG_NOTE_COLOR });
+        } else if (index === activeNoteIndex) {
           staveNote.setStyle({ fillStyle: ACTIVE_NOTE_COLOR, strokeStyle: ACTIVE_NOTE_COLOR });
         }
         return staveNote;
@@ -101,7 +111,12 @@ export function StaffDisplay({ notes, activeNoteIndex }: StaffDisplayProps) {
           keys: [note.key],
           duration: note.duration
         });
-        if (index === activeNoteIndex) {
+        const result = noteResults[index];
+        if (result === "correct") {
+          staveNote.setStyle({ fillStyle: CORRECT_NOTE_COLOR, strokeStyle: CORRECT_NOTE_COLOR });
+        } else if (result === "wrong") {
+          staveNote.setStyle({ fillStyle: WRONG_NOTE_COLOR, strokeStyle: WRONG_NOTE_COLOR });
+        } else if (index === activeNoteIndex) {
           staveNote.setStyle({ fillStyle: ACTIVE_NOTE_COLOR, strokeStyle: ACTIVE_NOTE_COLOR });
         }
         return staveNote;
@@ -116,7 +131,12 @@ export function StaffDisplay({ notes, activeNoteIndex }: StaffDisplayProps) {
           keys: [note.key],
           duration: note.duration
         });
-        if (index === activeNoteIndex) {
+        const result = noteResults[index];
+        if (result === "correct") {
+          staveNote.setStyle({ fillStyle: CORRECT_NOTE_COLOR, strokeStyle: CORRECT_NOTE_COLOR });
+        } else if (result === "wrong") {
+          staveNote.setStyle({ fillStyle: WRONG_NOTE_COLOR, strokeStyle: WRONG_NOTE_COLOR });
+        } else if (index === activeNoteIndex) {
           staveNote.setStyle({ fillStyle: ACTIVE_NOTE_COLOR, strokeStyle: ACTIVE_NOTE_COLOR });
         }
         return staveNote;
@@ -143,14 +163,14 @@ export function StaffDisplay({ notes, activeNoteIndex }: StaffDisplayProps) {
       bassTickables.filter((tickable) => tickable instanceof StaveNote)
     );
     [...trebleBeams, ...bassBeams].forEach((beam) => beam.setContext(context).draw());
-  }, [activeNoteIndex, availableWidth, firstNote?.clef, notes]);
+  }, [activeNoteIndex, availableWidth, firstNote?.clef, noteResults, notes, showGrandStaff]);
 
   return (
     <section className="staff-panel" aria-live="polite">
       <div className="staff-header">
         <h2>Read these notes in order</h2>
         <p>
-          {(notes.some((note) => note.clef === "treble") && notes.some((note) => note.clef === "bass"))
+          {(showGrandStaff || (notes.some((note) => note.clef === "treble") && notes.some((note) => note.clef === "bass")))
             ? "Treble + Bass"
             : renderClefLabel(firstNote.clef)}{" "}
           - Note {Math.min(activeNoteIndex + 1, notes.length)} of {notes.length}
@@ -160,7 +180,7 @@ export function StaffDisplay({ notes, activeNoteIndex }: StaffDisplayProps) {
         ref={containerRef}
         className="staff-canvas"
         aria-label={`Notes on ${
-          notes.some((note) => note.clef === "treble") && notes.some((note) => note.clef === "bass")
+          showGrandStaff || (notes.some((note) => note.clef === "treble") && notes.some((note) => note.clef === "bass"))
             ? "Treble and Bass Clefs"
             : renderClefLabel(firstNote.clef)
         }`}

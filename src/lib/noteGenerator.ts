@@ -22,7 +22,12 @@ export type DifficultyConfig = {
   exactPitchMatch: boolean;
 };
 
-const NOTE_DURATIONS: NoteDuration[] = ["q", "8", "h", "w"];
+const DURATION_WEIGHTS: ReadonlyArray<{ duration: NoteDuration; weight: number }> = [
+  { duration: "q", weight: 1 },
+  { duration: "8", weight: 1 },
+  { duration: "h", weight: 1 },
+  { duration: "w", weight: 1 }
+];
 const SHARP_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
 const FLAT_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"] as const;
 const DOUBLE_SHARP_ROOTS = ["C", "D", "F", "G", "A"] as const;
@@ -92,18 +97,38 @@ function toVexflowKey(label: string) {
 }
 
 function chooseDuration(): NoteDuration {
-  return NOTE_DURATIONS[randomIndex(NOTE_DURATIONS.length)];
+  const totalWeight = DURATION_WEIGHTS.reduce((sum, item) => sum + item.weight, 0);
+  let selector = Math.random() * totalWeight;
+  for (const item of DURATION_WEIGHTS) {
+    selector -= item.weight;
+    if (selector <= 0) {
+      return item.duration;
+    }
+  }
+  return "q";
 }
 
 function toNoteLetter(label: string): NoteLetter {
   return label[0] as NoteLetter;
 }
 
-function chooseClef(mode: ClefMode, midi: number): Clef {
+function chooseClef(mode: ClefMode): Clef {
   if (mode !== "mixed") {
     return mode;
   }
-  return midi >= 60 ? "treble" : "bass";
+  return Math.random() < 0.5 ? "treble" : "bass";
+}
+
+function getRangeForTierAndClef(tier: DifficultyTier, clef: Clef) {
+  if (clef === "treble") {
+    if (tier === "beginner") return { min: 64, max: 77 }; // E4..F5
+    if (tier === "intermediate") return { min: 60, max: 84 }; // C4..C6
+    return { min: 57, max: 84 }; // A3..C6 (<=2 ledger lines)
+  }
+
+  if (tier === "beginner") return { min: 43, max: 57 }; // G2..A3
+  if (tier === "intermediate") return { min: 40, max: 64 }; // E2..E4
+  return { min: 36, max: 64 }; // C2..E4 (<=2 ledger lines)
 }
 
 function naturalizeFromTargetMidi(midi: number, tier: DifficultyTier) {
@@ -171,26 +196,35 @@ export type NoteGeneratorFactory = {
 };
 
 export function createNoteGenerator(config: DifficultyConfig): NoteGeneratorFactory {
-  const pool: number[] = [];
-  for (let midi = config.minMidi; midi <= config.maxMidi; midi += 1) {
-    pool.push(midi);
-  }
+  const buildPool = (min: number, max: number) => {
+    const pool: number[] = [];
+    for (let midi = min; midi <= max; midi += 1) {
+      pool.push(midi);
+    }
+    return pool;
+  };
+
+  const trebleRange = getRangeForTierAndClef(config.tier, "treble");
+  const bassRange = getRangeForTierAndClef(config.tier, "bass");
+  const treblePool = buildPool(trebleRange.min, trebleRange.max);
+  const bassPool = buildPool(bassRange.min, bassRange.max);
 
   const generateFromPool = (mode: ClefMode, missCountByPitch?: ReadonlyMap<string, number>): GeneratedNote => {
+    const clef = chooseClef(mode);
+    const pool = clef === "treble" ? treblePool : bassPool;
     const midi = weightedPitchChoice(pool, missCountByPitch);
     const applyAccidental = Math.random() < config.accidentalProbability;
     const label = applyAccidental
       ? naturalizeFromTargetMidi(midi, config.tier)
       : midiToNaturalPitchName(midi, false);
-    const clef = chooseClef(mode, midi);
 
-  return {
-    clef,
-    key: toVexflowKey(label),
-    letter: toNoteLetter(label),
-    label,
-    duration: chooseDuration()
-  };
+    return {
+      clef,
+      key: toVexflowKey(label),
+      letter: toNoteLetter(label),
+      label,
+      duration: chooseDuration()
+    };
   };
 
   return {

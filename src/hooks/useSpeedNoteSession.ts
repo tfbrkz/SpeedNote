@@ -18,10 +18,13 @@ export type FeedbackState = {
   message: string;
 };
 
+export type NoteResultState = "pending" | "correct" | "wrong";
+
 export type SpeedNoteSessionState = {
   mode: ClefMode;
   difficulty: DifficultyTier;
   practiceMode: PracticeMode;
+  leaderboardMode: boolean;
   notesPerSet: number;
   numberOfSets: number;
   gameRunning: boolean;
@@ -33,6 +36,10 @@ export type SpeedNoteSessionState = {
   streak: number;
   correct: number;
   incorrect: number;
+  correctNotesAnswered: number;
+  totalNotesAnswered: number;
+  accuracyPercent: number;
+  currentNoteResults: NoteResultState[];
   currentNoteElapsedMs: number;
   averageResponseMs: number;
   feedback: FeedbackState;
@@ -48,6 +55,13 @@ const DEFAULT_PRACTICE_MODE: PracticeMode = "classic";
 const DEFAULT_NOTES_PER_SET = 4;
 const DEFAULT_NUMBER_OF_SETS = 5;
 const SPRINT_DURATION_MS = 60_000;
+const LEADERBOARD_MODE_PRESET = {
+  mode: "treble" as const,
+  difficulty: "beginner" as const,
+  practiceMode: "classic" as const,
+  notesPerSet: 4,
+  numberOfSets: 5
+};
 
 function isCorrectGuess(inputLabel: string, expectedLabel: string, exactPitch: boolean) {
   if (!exactPitch) {
@@ -65,6 +79,7 @@ export function useSpeedNoteSession() {
   const [mode, setMode] = useState<ClefMode>(DEFAULT_MODE);
   const [difficulty, setDifficulty] = useState<DifficultyTier>(DEFAULT_DIFFICULTY);
   const [practiceMode, setPracticeMode] = useState<PracticeMode>(DEFAULT_PRACTICE_MODE);
+  const [leaderboardMode, setLeaderboardMode] = useState(false);
   const [gameRunning, setGameRunning] = useState(false);
   const [numberOfSets, setNumberOfSets] = useState(DEFAULT_NUMBER_OF_SETS);
   const [completedSets, setCompletedSets] = useState(0);
@@ -73,14 +88,15 @@ export function useSpeedNoteSession() {
   const [correct, setCorrect] = useState(0);
   const [incorrect, setIncorrect] = useState(0);
   const [totalCorrectResponseTimeMs, setTotalCorrectResponseTimeMs] = useState(0);
-  const [correctNotesSolved, setCorrectNotesSolved] = useState(0);
-  const [pendingFailedTimeMs, setPendingFailedTimeMs] = useState(0);
+  const [correctNotesAnswered, setCorrectNotesAnswered] = useState(0);
+  const [totalNotesAnswered, setTotalNotesAnswered] = useState(0);
   const [noteStartedAt, setNoteStartedAt] = useState(() => Date.now());
   const [elapsedNow, setElapsedNow] = useState(() => Date.now());
   const [lastResponseTimeMs, setLastResponseTimeMs] = useState(0);
   const [locked, setLocked] = useState(false);
   const [remainingSprintMs, setRemainingSprintMs] = useState(SPRINT_DURATION_MS);
   const [missCountByPitch, setMissCountByPitch] = useState<Map<string, number>>(new Map());
+  const [currentSetHadWrong, setCurrentSetHadWrong] = useState(false);
   const nextSetTimeoutRef = useRef<number | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState>({
     revealAnswer: false,
@@ -98,6 +114,9 @@ export function useSpeedNoteSession() {
   );
   const [currentNotes, setCurrentNotes] = useState<GeneratedNote[]>(initialSet);
   const [currentNoteIndex, setCurrentNoteIndex] = useState(0);
+  const [currentNoteResults, setCurrentNoteResults] = useState<NoteResultState[]>(
+    Array.from({ length: initialSet.length }, () => "pending")
+  );
 
   const clearQueuedNextSet = useCallback(() => {
     if (nextSetTimeoutRef.current !== null) {
@@ -109,12 +128,11 @@ export function useSpeedNoteSession() {
   const nextNoteSet = useCallback(
     (nextMode: ClefMode, nextCount: number) => {
       clearQueuedNextSet();
-      setCurrentNotes(
-        generator.generateNoteSet(nextMode, nextCount, {
-          missCountByPitch
-        })
-      );
+      const nextNotes = generator.generateNoteSet(nextMode, nextCount, { missCountByPitch });
+      setCurrentNotes(nextNotes);
       setCurrentNoteIndex(0);
+      setCurrentNoteResults(Array.from({ length: nextNotes.length }, () => "pending"));
+      setCurrentSetHadWrong(false);
       setNoteStartedAt(Date.now());
       setElapsedNow(Date.now());
       setLastResponseTimeMs(0);
@@ -129,7 +147,12 @@ export function useSpeedNoteSession() {
   );
 
   const resetSessionState = useCallback(
-    (message: string) => {
+    (message: string, overrides?: { mode?: ClefMode; notesPerSet?: number; numberOfSets?: number; difficulty?: DifficultyTier }) => {
+      const targetMode = overrides?.mode ?? mode;
+      const targetNotesPerSet = overrides?.notesPerSet ?? notesPerSet;
+      const targetNumberOfSets = overrides?.numberOfSets ?? numberOfSets;
+      const targetDifficulty = overrides?.difficulty ?? difficulty;
+      const targetGenerator = createNoteGenerator(DIFFICULTY_CONFIGS[targetDifficulty]);
       clearQueuedNextSet();
       setGameRunning(false);
       setCompletedSets(0);
@@ -137,16 +160,16 @@ export function useSpeedNoteSession() {
       setCorrect(0);
       setIncorrect(0);
       setTotalCorrectResponseTimeMs(0);
-      setCorrectNotesSolved(0);
-      setPendingFailedTimeMs(0);
+      setCorrectNotesAnswered(0);
+      setTotalNotesAnswered(0);
       setLocked(false);
       setRemainingSprintMs(SPRINT_DURATION_MS);
-      setCurrentNotes(
-        generator.generateNoteSet(mode, notesPerSet, {
-          missCountByPitch
-        })
-      );
+      setNumberOfSets(targetNumberOfSets);
+      const nextNotes = targetGenerator.generateNoteSet(targetMode, targetNotesPerSet, { missCountByPitch });
+      setCurrentNotes(nextNotes);
       setCurrentNoteIndex(0);
+      setCurrentNoteResults(Array.from({ length: nextNotes.length }, () => "pending"));
+      setCurrentSetHadWrong(false);
       setNoteStartedAt(Date.now());
       setElapsedNow(Date.now());
       setLastResponseTimeMs(0);
@@ -156,7 +179,7 @@ export function useSpeedNoteSession() {
         message
       });
     },
-    [clearQueuedNextSet, generator, missCountByPitch, mode, notesPerSet]
+    [clearQueuedNextSet, difficulty, missCountByPitch, mode, notesPerSet, numberOfSets]
   );
 
   const start = useCallback(() => {
@@ -165,8 +188,8 @@ export function useSpeedNoteSession() {
       setCorrect(0);
       setIncorrect(0);
       setTotalCorrectResponseTimeMs(0);
-      setCorrectNotesSolved(0);
-      setPendingFailedTimeMs(0);
+      setCorrectNotesAnswered(0);
+      setTotalNotesAnswered(0);
       setCompletedSets(0);
     }
     void warmPianoSamples();
@@ -184,27 +207,6 @@ export function useSpeedNoteSession() {
     resetSessionState("Press Start to begin.");
   }, [resetSessionState]);
 
-  const scheduleNextOrStop = useCallback(
-    (nextCompletedSets: number) => {
-      setCompletedSets(nextCompletedSets);
-      const shouldStopBySets = nextCompletedSets >= numberOfSets;
-      const shouldStopBySurvival = practiceMode === "survival" && incorrect >= 2;
-      const shouldStopBySprint = practiceMode === "sprint" && remainingSprintMs <= 0;
-
-      if (shouldStopBySets || shouldStopBySurvival || shouldStopBySprint) {
-        setGameRunning(false);
-        clearQueuedNextSet();
-        return;
-      }
-
-      const delayMs = practiceMode === "sprint" ? 0 : 1000;
-      nextSetTimeoutRef.current = window.setTimeout(() => {
-        nextNoteSet(mode, notesPerSet);
-      }, delayMs);
-    },
-    [clearQueuedNextSet, incorrect, mode, nextNoteSet, notesPerSet, numberOfSets, practiceMode, remainingSprintMs]
-  );
-
   const currentTargetNote = currentNotes[currentNoteIndex] ?? currentNotes[0];
 
   const submitGuess = useCallback(
@@ -214,86 +216,95 @@ export function useSpeedNoteSession() {
       }
       const exactPitch = DIFFICULTY_CONFIGS[difficulty].exactPitchMatch;
       const isCorrect = isCorrectGuess(guessLabel, currentTargetNote.label, exactPitch);
+      const responseTimeMs = Date.now() - noteStartedAt;
 
-      if (!isCorrect) {
-        const responseTimeMs = Date.now() - noteStartedAt;
-        setLastResponseTimeMs(responseTimeMs);
-        setLocked(true);
-        setFeedback({
-          revealAnswer: true,
-          lastGuess,
-          message: `Set failed. Expected ${currentTargetNote.label} for note ${currentNoteIndex + 1}.`
+      setLastResponseTimeMs(responseTimeMs);
+      setTotalNotesAnswered((value) => value + 1);
+      setCurrentNoteResults((current) => {
+        const next = [...current];
+        next[currentNoteIndex] = isCorrect ? "correct" : "wrong";
+        return next;
+      });
+
+      if (isCorrect) {
+        setTotalCorrectResponseTimeMs((value) => value + responseTimeMs);
+        setCorrectNotesAnswered((value) => value + 1);
+        void playPianoNote(currentTargetNote.label).catch(() => {
+          // Keep gameplay unblocked if audio playback fails.
         });
-        setIncorrect((value) => value + 1);
-        setStreak(0);
-        setPendingFailedTimeMs((value) => value + responseTimeMs);
+      } else {
+        setCurrentSetHadWrong(true);
         setMissCountByPitch((current) => {
           const next = new Map(current);
           next.set(currentTargetNote.label, (next.get(currentTargetNote.label) ?? 0) + 1);
           return next;
         });
-        const nextCompletedSets = completedSets + 1;
-        scheduleNextOrStop(nextCompletedSets);
-        if (nextCompletedSets >= numberOfSets) {
-          setFeedback({
-            revealAnswer: true,
-            lastGuess,
-            message: `Set failed. Expected ${currentTargetNote.label}. Session complete (${nextCompletedSets}/${numberOfSets} sets).`
-          });
-        }
-        return;
       }
-
-      void playPianoNote(currentTargetNote.label).catch(() => {
-        // Keep gameplay unblocked if audio playback fails.
-      });
 
       const isLastInSet = currentNoteIndex === currentNotes.length - 1;
       if (!isLastInSet) {
         setCurrentNoteIndex((value) => value + 1);
+        setNoteStartedAt(Date.now());
+        setElapsedNow(Date.now());
         setFeedback({
-          revealAnswer: false,
+          revealAnswer: true,
           lastGuess,
-          message: `Good. Now identify note ${currentNoteIndex + 2} of ${currentNotes.length}.`
+          message: isCorrect
+            ? `Correct. Now identify note ${currentNoteIndex + 2} of ${currentNotes.length}.`
+            : `Incorrect. Expected ${currentTargetNote.letter}. Continue to note ${currentNoteIndex + 2} of ${currentNotes.length}.`
         });
         return;
       }
 
-      const responseTimeMs = Date.now() - noteStartedAt;
-      setLastResponseTimeMs(responseTimeMs);
-      setLocked(true);
-      setFeedback({
-        revealAnswer: true,
-        lastGuess,
-        message: `Set complete! All ${currentNotes.length} notes were correct.`
-      });
-      setCorrect((value) => value + 1);
-      setCorrectNotesSolved((value) => value + currentNotes.length);
-      setStreak((value) => value + 1);
-      setTotalCorrectResponseTimeMs((value) => value + pendingFailedTimeMs + responseTimeMs);
-      setPendingFailedTimeMs(0);
       const nextCompletedSets = completedSets + 1;
-      scheduleNextOrStop(nextCompletedSets);
-      if (nextCompletedSets >= numberOfSets) {
+      setCompletedSets(nextCompletedSets);
+      setLocked(true);
+      const finalSetHadWrong = currentSetHadWrong || !isCorrect;
+      if (finalSetHadWrong) {
+        setIncorrect((value) => value + 1);
+        setStreak(0);
         setFeedback({
           revealAnswer: true,
           lastGuess,
-          message: `Set complete! Session complete (${nextCompletedSets}/${numberOfSets} sets).`
+          message: `Set complete with mistakes (${nextCompletedSets}/${numberOfSets}).`
+        });
+      } else {
+        setCorrect((value) => value + 1);
+        setStreak((value) => value + 1);
+        setFeedback({
+          revealAnswer: true,
+          lastGuess,
+          message: `Perfect set complete (${nextCompletedSets}/${numberOfSets}).`
         });
       }
+
+      if (nextCompletedSets >= numberOfSets) {
+        setGameRunning(false);
+        clearQueuedNextSet();
+        return;
+      }
+
+      const delayMs = practiceMode === "sprint" ? 0 : 800;
+      nextSetTimeoutRef.current = window.setTimeout(() => {
+        nextNoteSet(mode, notesPerSet);
+      }, delayMs);
     },
     [
       completedSets,
+      clearQueuedNextSet,
       currentNoteIndex,
       currentNotes.length,
       currentTargetNote,
+      currentSetHadWrong,
       difficulty,
       gameRunning,
       locked,
+      mode,
       noteStartedAt,
+      notesPerSet,
       numberOfSets,
-      pendingFailedTimeMs,
-      scheduleNextOrStop
+      practiceMode,
+      nextNoteSet
     ]
   );
 
@@ -315,32 +326,65 @@ export function useSpeedNoteSession() {
   const onModeChange = useCallback(
     (nextMode: ClefMode) => {
       setMode(nextMode);
-      resetSessionState("Mode updated. Press Start to begin.");
+      resetSessionState("Mode updated. Press Start to begin.", { mode: nextMode });
     },
     [resetSessionState]
   );
 
   const onDifficultyChange = useCallback((nextDifficulty: DifficultyTier) => {
+    if (leaderboardMode) {
+      return;
+    }
     setDifficulty(nextDifficulty);
     setMissCountByPitch(new Map());
-  }, []);
+    resetSessionState("Difficulty updated. Press Start to begin.", { difficulty: nextDifficulty });
+  }, [leaderboardMode, resetSessionState]);
 
   const onPracticeModeChange = useCallback((nextPracticeMode: PracticeMode) => {
+    if (leaderboardMode) {
+      return;
+    }
     setPracticeMode(nextPracticeMode);
-  }, []);
+  }, [leaderboardMode]);
 
   const onNotesPerSetChange = useCallback(
     (count: number) => {
+      if (leaderboardMode) {
+        return;
+      }
       setNotesPerSet(count);
-      resetSessionState("Set size updated. Press Start to begin.");
+      resetSessionState("Set size updated. Press Start to begin.", { notesPerSet: count });
     },
-    [resetSessionState]
+    [leaderboardMode, resetSessionState]
   );
 
   const onNumberOfSetsChange = useCallback(
     (count: number) => {
-      setNumberOfSets(count);
-      resetSessionState(`Number of sets updated to ${count}. Press Start to begin.`);
+      if (leaderboardMode) {
+        return;
+      }
+      resetSessionState(`Number of sets updated to ${count}. Press Start to begin.`, { numberOfSets: count });
+    },
+    [leaderboardMode, resetSessionState]
+  );
+
+  const onLeaderboardModeChange = useCallback(
+    (enabled: boolean) => {
+      setLeaderboardMode(enabled);
+      if (enabled) {
+        setMode(LEADERBOARD_MODE_PRESET.mode);
+        setDifficulty(LEADERBOARD_MODE_PRESET.difficulty);
+        setPracticeMode(LEADERBOARD_MODE_PRESET.practiceMode);
+        setNotesPerSet(LEADERBOARD_MODE_PRESET.notesPerSet);
+        resetSessionState("Leaderboard mode enabled.", {
+          mode: LEADERBOARD_MODE_PRESET.mode,
+          difficulty: LEADERBOARD_MODE_PRESET.difficulty,
+          notesPerSet: LEADERBOARD_MODE_PRESET.notesPerSet,
+          numberOfSets: LEADERBOARD_MODE_PRESET.numberOfSets
+        });
+        return;
+      }
+      resetSessionState("Leaderboard mode disabled.");
     },
     [resetSessionState]
   );
@@ -383,9 +427,10 @@ export function useSpeedNoteSession() {
     return Math.max(0, elapsed);
   }, [elapsedNow, lastResponseTimeMs, locked, noteStartedAt]);
 
-  const averageResponseMs = correctNotesSolved > 0 ? totalCorrectResponseTimeMs / correctNotesSolved : 0;
+  const averageResponseMs = correctNotesAnswered > 0 ? totalCorrectResponseTimeMs / correctNotesAnswered : 0;
+  const accuracyPercent = totalNotesAnswered > 0 ? (correctNotesAnswered / totalNotesAnswered) * 100 : 0;
   const roundEnded = !gameRunning && completedSets >= numberOfSets;
-  const leaderboardEligible = completedSets >= 5 && correct === completedSets;
+  const leaderboardEligible = leaderboardMode && roundEnded;
   const feedbackClass: "neutral" | "success" | "error" = !feedback.revealAnswer
     ? "neutral"
     : feedback.lastGuess === currentTargetNote?.letter
@@ -397,6 +442,7 @@ export function useSpeedNoteSession() {
       mode,
       difficulty,
       practiceMode,
+      leaderboardMode,
       notesPerSet,
       numberOfSets,
       gameRunning,
@@ -408,6 +454,10 @@ export function useSpeedNoteSession() {
       streak,
       correct,
       incorrect,
+      correctNotesAnswered,
+      totalNotesAnswered,
+      accuracyPercent,
+      currentNoteResults,
       currentNoteElapsedMs,
       averageResponseMs,
       feedback,
@@ -425,7 +475,8 @@ export function useSpeedNoteSession() {
       onDifficultyChange,
       onPracticeModeChange,
       onNotesPerSetChange,
-      onNumberOfSetsChange
+      onNumberOfSetsChange,
+      onLeaderboardModeChange
     }
   };
 }

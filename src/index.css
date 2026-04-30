@@ -80,6 +80,65 @@ body {
   padding: 0.9rem 1rem;
 }
 
+.app-main-header {
+  display: grid;
+  gap: 0.7rem;
+  border: 1px solid var(--border);
+  background: rgba(10, 13, 27, 0.72);
+  border-radius: var(--radius-md);
+  padding: 0.9rem 1rem;
+}
+
+.tab-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.tab-row button {
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: rgba(10, 13, 27, 0.85);
+  color: var(--text-secondary);
+  font-weight: 700;
+  padding: 0.42rem 0.9rem;
+  cursor: pointer;
+  transition: background-color var(--ease-out), border-color var(--ease-out), transform var(--ease-out);
+}
+
+.tab-row button:hover {
+  transform: translateY(-1px);
+}
+
+.tab-row button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: #ddd6fe;
+}
+
+.app-tab-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.instructions-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(32, 43, 77, 0.45), rgba(17, 20, 38, 0.82));
+  box-shadow: var(--shadow-card);
+  padding: 0.8rem 0.9rem;
+}
+
+.instructions-panel h3 {
+  margin: 0 0 0.45rem;
+}
+
+.instructions-panel p {
+  margin: 0 0 0.45rem;
+  color: var(--text-secondary);
+  font-size: 0.87rem;
+}
+
 .app-kicker {
   margin: 0;
   color: var(--accent);
@@ -380,6 +439,12 @@ summary:focus-visible {
   transform: none;
 }
 
+.auth-panel p {
+  margin: 0 0 0.45rem;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+}
+
 .leaderboard-error {
   margin: 0.5rem 0 0;
   font-size: 0.82rem;
@@ -399,10 +464,28 @@ summary:focus-visible {
   user-select: none;
 }
 
+.settings-group {
+  margin-bottom: 0.85rem;
+}
+
+.settings-label {
+  margin: 0 0 0.15rem;
+  font-size: 0.86rem;
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.settings-description {
+  margin: 0 0 0.45rem;
+  font-size: 0.79rem;
+  color: var(--text-secondary);
+}
+
 .mode-row {
   display: flex;
   gap: 0.48rem;
   margin-bottom: 0.82rem;
+  flex-wrap: wrap;
 }
 
 .mode-row button {
@@ -424,6 +507,10 @@ summary:focus-visible {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: #ddd6fe;
+}
+
+.notes-per-set-row button {
+  min-width: 2.35rem;
 }
 
 .set-size-row {
@@ -511,6 +598,10 @@ summary:focus-visible {
   border: 1px solid var(--border);
   background: rgba(10, 13, 27, 0.65);
   font-size: 0.82rem;
+}
+
+.leaderboard-row.compact {
+  grid-template-columns: minmax(140px, 1.8fr) minmax(120px, 1fr) minmax(100px, 1fr);
 }
 
 .leaderboard-header {
@@ -618,6 +709,14 @@ summary:focus-visible {
   .app-topbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .tab-row {
+    gap: 0.4rem;
+  }
+
+  .tab-row button {
+    font-size: 0.82rem;
   }
 
   .session-row {

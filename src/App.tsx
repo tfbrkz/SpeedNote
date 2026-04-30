@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Profanity } from "@2toad/profanity";
+import type { Session, User } from "@supabase/supabase-js";
+import { AnswerButtons } from "./components/AnswerButtons";
 import { InputController } from "./components/InputController";
 import { StaffContainer } from "./components/StaffContainer";
 import { StatDashboard } from "./components/StatDashboard";
 import { useMidi } from "./providers/midiContext";
 import { useSpeedNoteSession } from "./hooks/useSpeedNoteSession";
-import { type ClefMode, type DifficultyTier, type NoteLetter } from "./lib/noteGenerator";
+import { supabase } from "./lib/supabaseClient";
+import { type NoteLetter } from "./lib/noteGenerator";
 
-const LEADERBOARD_MAX_ENTRIES = 10;
-const LEADERBOARD_NAME_MAX_LENGTH = 24;
+const LEADERBOARD_MAX_ENTRIES = 100;
 const ADSENSE_CLIENT_ID = import.meta.env.VITE_ADSENSE_CLIENT_ID as string | undefined;
 const ADSENSE_LEFT_SLOT_ID = import.meta.env.VITE_ADSENSE_LEFT_SLOT_ID as string | undefined;
 const ADSENSE_RIGHT_SLOT_ID = import.meta.env.VITE_ADSENSE_RIGHT_SLOT_ID as string | undefined;
@@ -55,53 +56,30 @@ function AdRail({ slotId, label }: AdRailProps) {
   );
 }
 
-const profanity = new Profanity();
-
-function validateLeaderboardName(rawName: string) {
-  const name = rawName.trim();
-  if (!name) {
-    return "Please enter a name.";
-  }
-
-  if (name.length > LEADERBOARD_NAME_MAX_LENGTH) {
-    return `Name must be ${LEADERBOARD_NAME_MAX_LENGTH} characters or less.`;
-  }
-
-  const hasUrlPattern =
-    /(https?:\/\/|www\.|[a-z0-9-]+\.(com|net|org|io|co|gg|app|dev|me|tv|xyz|uk|us|ca|de|fr|jp|au|nl|ru|ch|it|es|in)\b)/i.test(
-      name
-    );
-  if (hasUrlPattern) {
-    return "Names cannot contain links or website addresses.";
-  }
-
-  if (profanity.exists(name)) {
-    return "Please choose a cleaner name.";
-  }
-
-  return null;
-}
-
 type LeaderboardEntry = {
-  id: string;
-  user: string;
-  score: number;
-  difficulty: DifficultyTier;
-  mode: ClefMode | "unknown";
-  timestamp: number;
+  user_id: string;
+  username: string;
+  average_time_per_note_ms: number;
+  accuracy: number;
+  updated_at: string;
 };
 
+type AppTab = "game" | "settings" | "leaderboard";
+
 function App() {
+  const [activeTab, setActiveTab] = useState<AppTab>("game");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { status: midiStatus, errorMessage: midiErrorMessage, subscribeNoteOn } = useMidi();
   const { state, actions } = useSpeedNoteSession();
+  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([]);
-  const [leaderboardModeFilter, setLeaderboardModeFilter] = useState<ClefMode | "all">("all");
-  const [leaderboardName, setLeaderboardName] = useState("");
-  const [leaderboardNameError, setLeaderboardNameError] = useState<string | null>(null);
-  const [adminKey, setAdminKey] = useState("");
   const [leaderboardApiError, setLeaderboardApiError] = useState<string | null>(null);
-  const [hasSubmittedRound, setHasSubmittedRound] = useState(false);
+  const [lastAutoSubmittedSignature, setLastAutoSubmittedSignature] = useState<string | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -133,8 +111,22 @@ function App() {
   }, [actions, state.gameRunning, state.locked, subscribeNoteOn]);
 
   useEffect(() => {
-    let cancelled = false;
+    void supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setUser(data.session?.user ?? null);
+    });
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event: string, nextSession: Session | null) => {
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
+      setAuthError(null);
+    });
+    return () => {
+      subscription.subscription.unsubscribe();
+    };
+  }, []);
 
+  useEffect(() => {
+    let cancelled = false;
     void (async () => {
       try {
         const response = await fetch("/api/leaderboard");
@@ -163,121 +155,146 @@ function App() {
     () =>
       [...leaderboardEntries]
         .sort((left, right) => {
-          if (left.score === right.score) {
-            return left.timestamp - right.timestamp;
+          if (left.accuracy === right.accuracy) {
+            return left.average_time_per_note_ms - right.average_time_per_note_ms;
           }
-          return right.score - left.score;
+          return right.accuracy - left.accuracy;
         })
         .slice(0, LEADERBOARD_MAX_ENTRIES),
     [leaderboardEntries]
-  );
-  const filteredLeaderboard = useMemo(
-    () =>
-      sortedLeaderboard.filter((entry) => leaderboardModeFilter === "all" || entry.mode === leaderboardModeFilter),
-    [leaderboardModeFilter, sortedLeaderboard]
   );
 
   const handleStartStop = useCallback(() => {
     if (state.gameRunning) {
       actions.stop();
-      setHasSubmittedRound(false);
-      setLeaderboardName("");
-      setLeaderboardNameError(null);
       return;
     }
     actions.start();
   }, [actions, state.gameRunning]);
 
-  const leaderboardScore = useMemo(() => {
-    if (state.averageResponseMs <= 0) {
-      return 0;
-    }
-    return Math.max(1, Math.round((state.correct / state.averageResponseMs) * 100000));
-  }, [state.averageResponseMs, state.correct]);
-
-  const handleLeaderboardSubmit = useCallback(() => {
-    const trimmedName = leaderboardName.trim();
-    if (!trimmedName || !state.roundEnded || hasSubmittedRound || !state.leaderboardEligible) {
+  useEffect(() => {
+    if (!session?.access_token || !user || !state.roundEnded || !state.leaderboardMode || !state.leaderboardEligible) {
       return;
     }
-
-    const validationError = validateLeaderboardName(trimmedName);
-    if (validationError) {
-      setLeaderboardNameError(validationError);
+    if (state.averageResponseMs <= 0 || state.totalNotesAnswered <= 0) {
       return;
     }
-
-    const entry: LeaderboardEntry = {
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      user: trimmedName,
-      score: leaderboardScore,
-      difficulty: state.difficulty,
-      mode: state.mode,
-      timestamp: Date.now()
-    };
+    const signature = `${user.id}:${state.completedSets}:${state.correctNotesAnswered}:${state.totalNotesAnswered}:${state.averageResponseMs}`;
+    if (signature === lastAutoSubmittedSignature) {
+      return;
+    }
 
     void (async () => {
       try {
+        const username = (user.user_metadata?.username as string | undefined) ?? user.email ?? `user-${user.id.slice(0, 8)}`;
         const response = await fetch("/api/leaderboard", {
           method: "POST",
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`
           },
-          body: JSON.stringify(entry)
+          body: JSON.stringify({
+            username,
+            averageTimePerNoteMs: state.averageResponseMs,
+            accuracy: state.accuracyPercent / 100
+          })
         });
 
         if (!response.ok) {
           const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
-          setLeaderboardNameError(errorPayload?.error ?? "Failed to submit score.");
+          setLeaderboardApiError(errorPayload?.error ?? "Failed to submit leaderboard run.");
           return;
         }
 
         const payload = (await response.json()) as { entries?: LeaderboardEntry[] };
         setLeaderboardEntries(Array.isArray(payload.entries) ? payload.entries : []);
-        setHasSubmittedRound(true);
-        setLeaderboardNameError(null);
+        setLastAutoSubmittedSignature(signature);
         setLeaderboardApiError(null);
       } catch {
-        setLeaderboardNameError("Failed to submit score.");
+        setLeaderboardApiError("Failed to submit leaderboard run.");
       }
     })();
-  }, [hasSubmittedRound, leaderboardName, leaderboardScore, state.difficulty, state.leaderboardEligible, state.mode, state.roundEnded]);
+  }, [
+    lastAutoSubmittedSignature,
+    session?.access_token,
+    state.accuracyPercent,
+    state.averageResponseMs,
+    state.completedSets,
+    state.correctNotesAnswered,
+    state.leaderboardEligible,
+    state.leaderboardMode,
+    state.roundEnded,
+    state.totalNotesAnswered,
+    user
+  ]);
 
-  const handleAdminDelete = useCallback(
-    async (entryId: string) => {
-      if (!adminKey.trim()) {
-        setLeaderboardApiError("Enter admin key to delete entries.");
-        return;
-      }
+  const handleAuthSignup = useCallback(async () => {
+    setAuthBusy(true);
+    setAuthError(null);
+    const { error } = await supabase.auth.signUp({
+      email: authEmail,
+      password: authPassword
+    });
+    setAuthBusy(false);
+    if (error) {
+      setAuthError(error.message);
+      return;
+    }
+    setAuthPassword("");
+  }, [authEmail, authPassword]);
 
-      try {
-        const response = await fetch(`/api/leaderboard?id=${encodeURIComponent(entryId)}`, {
-          method: "DELETE",
-          headers: {
-            "x-admin-key": adminKey.trim()
-          }
-        });
+  const handleAuthLogin = useCallback(async () => {
+    setAuthBusy(true);
+    setAuthError(null);
+    const { error } = await supabase.auth.signInWithPassword({
+      email: authEmail,
+      password: authPassword
+    });
+    setAuthBusy(false);
+    if (error) {
+      setAuthError(error.message);
+      return;
+    }
+    setAuthPassword("");
+  }, [authEmail, authPassword]);
 
-        if (!response.ok) {
-          const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
-          setLeaderboardApiError(errorPayload?.error ?? "Failed to delete entry.");
-          return;
-        }
-
-        const payload = (await response.json()) as { entries?: LeaderboardEntry[] };
-        setLeaderboardEntries(Array.isArray(payload.entries) ? payload.entries : []);
-        setLeaderboardApiError(null);
-      } catch {
-        setLeaderboardApiError("Failed to delete entry.");
-      }
-    },
-    [adminKey]
-  );
+  const handleLogout = useCallback(async () => {
+    await supabase.auth.signOut();
+    setLastAutoSubmittedSignature(null);
+  }, []);
 
   return (
     <main className="page-layout">
       <AdRail label="Left" slotId={ADSENSE_LEFT_SLOT_ID} />
       <section className="app-shell">
+        <header className="app-main-header">
+          <div className="app-heading">
+            <p className="app-kicker">SpeedNote</p>
+            <h1>Learn to read sheet music at speed</h1>
+          </div>
+          <nav className="tab-row" aria-label="Main sections">
+            <button type="button" className={activeTab === "game" ? "active" : ""} onClick={() => setActiveTab("game")}>
+              Game
+            </button>
+            <button
+              type="button"
+              className={activeTab === "settings" ? "active" : ""}
+              onClick={() => setActiveTab("settings")}
+            >
+              Instructions & Settings
+            </button>
+            <button
+              type="button"
+              className={activeTab === "leaderboard" ? "active" : ""}
+              onClick={() => setActiveTab("leaderboard")}
+            >
+              Leaderboard
+            </button>
+          </nav>
+        </header>
+
+        {activeTab === "game" && (
+          <>
         <StatDashboard
           streak={state.streak}
           correct={state.correct}
@@ -290,21 +307,37 @@ function App() {
           onStartStop={handleStartStop}
         />
 
-        <StaffContainer
-          notes={state.currentNotes}
-          activeNoteIndex={state.currentNoteIndex}
-          feedbackMessage={state.feedback.message}
-          feedbackClass={state.feedbackClass}
-        />
+        <section className="training-stack">
+          <StaffContainer
+            notes={state.currentNotes}
+            activeNoteIndex={state.currentNoteIndex}
+            feedbackMessage={state.feedback.message}
+            feedbackClass={state.feedbackClass}
+            showGrandStaff={state.mode === "mixed"}
+            noteResults={state.currentNoteResults}
+          />
+          <AnswerButtons
+            disabled={state.locked || !state.gameRunning}
+            lastGuess={state.feedback.lastGuess}
+            correctLetter={state.currentTargetNote.letter}
+            revealAnswer={state.feedback.revealAnswer}
+            onAnswer={actions.handleAnswer}
+          />
+        </section>
+          </>
+        )}
 
-        <div className="app-lower-grid">
-          <section className="control-stack">
+        {activeTab === "settings" && (
+          <section className="app-tab-panel">
+            <section className="instructions-panel">
+              <h3>How to play</h3>
+              <p>Start a session, read each note from left to right, and choose the correct letter name.</p>
+              <p>In mixed mode, both treble and bass staves are shown. Keyboard answers (`A-G`) and MIDI input are supported.</p>
+              <p>Choose a higher difficulty to expand range and accidental complexity. Sprint is timed; Survival ends after mistakes.</p>
+            </section>
             <InputController
               gameRunning={state.gameRunning}
-              locked={state.locked}
-              lastGuess={state.feedback.lastGuess}
-              correctLetter={state.currentTargetNote.letter}
-              revealAnswer={state.feedback.revealAnswer}
+              leaderboardMode={state.leaderboardMode}
               mode={state.mode}
               difficulty={state.difficulty}
               practiceMode={state.practiceMode}
@@ -312,110 +345,93 @@ function App() {
               numberOfSets={state.numberOfSets}
               settingsOpen={settingsOpen}
               midiStatus={midiErrorMessage ? `error (${midiErrorMessage})` : midiStatus}
-              onAnswer={actions.handleAnswer}
               onModeChange={actions.onModeChange}
               onDifficultyChange={actions.onDifficultyChange}
               onPracticeModeChange={actions.onPracticeModeChange}
               onNotesPerSetChange={actions.onNotesPerSetChange}
               onNumberOfSetsChange={actions.onNumberOfSetsChange}
+              onLeaderboardModeChange={actions.onLeaderboardModeChange}
               onSettingsOpenChange={setSettingsOpen}
             />
           </section>
-          <section className="control-stack">
-            {state.roundEnded && (
-              <section className="leaderboard-submit">
-                <h3>Round Complete</h3>
-                <p>
-                  {state.leaderboardEligible
-                    ? "Submit this score to the leaderboard."
-                    : "Leaderboard requires at least 5 sets and a perfect run (correct sets must equal total sets)."}
-                </p>
-                <div className="leaderboard-submit-row">
-                  <input
-                    type="text"
-                    value={leaderboardName}
-                    onChange={(event) => {
-                      setLeaderboardName(event.target.value);
-                      if (leaderboardNameError) {
-                        setLeaderboardNameError(null);
-                      }
-                    }}
-                    placeholder="Enter name"
-                    maxLength={LEADERBOARD_NAME_MAX_LENGTH}
-                    disabled={hasSubmittedRound || !state.leaderboardEligible}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleLeaderboardSubmit}
-                    disabled={hasSubmittedRound || !state.leaderboardEligible || !leaderboardName.trim()}
-                  >
-                    {hasSubmittedRound ? "Submitted" : "Submit"}
+        )}
+
+        {activeTab === "leaderboard" && (
+          <section className="app-tab-panel">
+            <section className="leaderboard-submit">
+              <h3>Account</h3>
+              {session && user ? (
+                <div className="auth-panel">
+                  <p>Logged in as {user.email}</p>
+                  <button type="button" className="session-btn" onClick={() => void handleLogout()}>
+                    Log out
                   </button>
                 </div>
-                {leaderboardNameError && <p className="leaderboard-error">{leaderboardNameError}</p>}
-              </section>
-            )}
+              ) : (
+                <div className="auth-panel">
+                  <p>Sign in or create an account to auto-submit leaderboard runs.</p>
+                  <div className="leaderboard-submit-row">
+                    <input
+                      type="email"
+                      placeholder="Email"
+                      value={authEmail}
+                      onChange={(event) => setAuthEmail(event.target.value)}
+                      autoComplete="email"
+                    />
+                    <input
+                      type="password"
+                      placeholder="Password"
+                      value={authPassword}
+                      onChange={(event) => setAuthPassword(event.target.value)}
+                      autoComplete="current-password"
+                    />
+                  </div>
+                  <div className="leaderboard-submit-row">
+                    <button type="button" onClick={() => void handleAuthLogin()} disabled={authBusy || !authEmail || !authPassword}>
+                      Log in
+                    </button>
+                    <button type="button" onClick={() => void handleAuthSignup()} disabled={authBusy || !authEmail || !authPassword}>
+                      Sign up
+                    </button>
+                  </div>
+                  {authError && <p className="leaderboard-error">{authError}</p>}
+                </div>
+              )}
+              {state.roundEnded && state.leaderboardMode && (
+                <p>
+                  {session
+                    ? "Run complete. Your leaderboard result is submitted automatically."
+                    : "Run complete. Log in to auto-submit your result."}
+                </p>
+              )}
+            </section>
+
             <section className="leaderboard-panel" aria-label="Leaderboard">
               <div className="leaderboard-header-row">
                 <h3>Leaderboard</h3>
-                <label className="leaderboard-filter">
-                  <span>Mode</span>
-                  <select
-                    value={leaderboardModeFilter}
-                    onChange={(event) => setLeaderboardModeFilter(event.target.value as ClefMode | "all")}
-                  >
-                    <option value="all">All</option>
-                    <option value="treble">Treble</option>
-                    <option value="bass">Bass</option>
-                    <option value="mixed">Mixed</option>
-                  </select>
-                </label>
-              </div>
-              <div className="leaderboard-admin-row">
-                <input
-                  type="password"
-                  value={adminKey}
-                  onChange={(event) => setAdminKey(event.target.value)}
-                  placeholder="Admin key for deletes"
-                />
               </div>
               {leaderboardApiError && <p className="leaderboard-error">{leaderboardApiError}</p>}
-              {filteredLeaderboard.length === 0 ? (
+              {sortedLeaderboard.length === 0 ? (
                 <p className="leaderboard-empty">No scores submitted yet.</p>
               ) : (
                 <div className="leaderboard-table">
                   <div className="leaderboard-row leaderboard-header">
-                    <span>User</span>
-                    <span>Mode</span>
-                    <span>Difficulty</span>
-                    <span>Score</span>
-                    <span>Timestamp</span>
-                    <span>Admin</span>
+                    <span>Username</span>
+                    <span>Average time / note</span>
+                    <span>Accuracy</span>
                   </div>
-                  {filteredLeaderboard.map((entry) => (
-                    <div key={entry.id} className="leaderboard-row">
-                      <span>{entry.user}</span>
-                      <span>{entry.mode === "unknown" ? "-" : entry.mode}</span>
-                      <span>{entry.difficulty}</span>
-                      <span>{entry.score}</span>
-                      <span>{new Date(entry.timestamp).toLocaleDateString()}</span>
-                      <span>
-                        <button
-                          type="button"
-                          className="leaderboard-delete-btn"
-                          onClick={() => void handleAdminDelete(entry.id)}
-                          disabled={!adminKey.trim()}
-                        >
-                          Delete
-                        </button>
-                      </span>
+                  {sortedLeaderboard.map((entry) => (
+                    <div key={entry.user_id} className="leaderboard-row compact">
+                      <span>{entry.username}</span>
+                      <span>{(entry.average_time_per_note_ms / 1000).toFixed(2)}s</span>
+                      <span>{(entry.accuracy * 100).toFixed(1)}%</span>
                     </div>
                   ))}
                 </div>
               )}
             </section>
           </section>
-        </div>
+        )}
       </section>
       <AdRail label="Right" slotId={ADSENSE_RIGHT_SLOT_ID} />
       <footer className="site-footer">Copyright &copy; 2026 SpeedNote Piano</footer>

@@ -1,35 +1,35 @@
 import { Profanity } from "@2toad/profanity";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { kv } from "@vercel/kv";
-
-type ClefMode = "treble" | "bass" | "mixed";
-type DifficultyTier = "beginner" | "intermediate" | "advanced";
-type StoredMode = ClefMode | "unknown";
+import { createClient } from "@supabase/supabase-js";
 
 type LeaderboardEntry = {
-  id: string;
-  user: string;
-  score: number;
-  difficulty: DifficultyTier;
-  mode: StoredMode;
-  timestamp: number;
+  user_id: string;
+  username: string;
+  average_time_per_note_ms: number;
+  accuracy: number;
+  updated_at: string;
 };
 
 const profanity = new Profanity();
-const MAX_ENTRIES = 10;
+const MAX_ENTRIES = 100;
 const NAME_MAX_LENGTH = 24;
-const KV_KEY = "leaderboard:entries";
+const TABLE_NAME = "speednote_leaderboard";
 
-function isMode(value: unknown): value is ClefMode {
-  return value === "treble" || value === "bass" || value === "mixed";
+function getSupabaseServerClient() {
+  const url = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceRoleKey) {
+    return null;
+  }
+  return createClient(url, serviceRoleKey, {
+    auth: {
+      persistSession: false
+    }
+  });
 }
 
-function isDifficulty(value: unknown): value is DifficultyTier {
-  return value === "beginner" || value === "intermediate" || value === "advanced";
-}
-
-function validateName(user: string) {
-  const trimmed = user.trim();
+function validateUsername(username: string) {
+  const trimmed = username.trim();
   if (!trimmed) {
     return "Please enter a name.";
   }
@@ -53,115 +53,132 @@ function validateName(user: string) {
   return null;
 }
 
-function sortLeaderboard(entries: LeaderboardEntry[]) {
-  return [...entries]
-    .sort((left, right) => {
-      if (left.score === right.score) {
-        return left.timestamp - right.timestamp;
-      }
-      return right.score - left.score;
-    })
-    .slice(0, MAX_ENTRIES);
-}
-
-async function getEntries() {
-  const stored = await kv.get<LeaderboardEntry[]>(KV_KEY);
-  if (!Array.isArray(stored)) {
-    return [];
+async function getUserIdFromRequest(req: VercelRequest) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return null;
   }
-  return sortLeaderboard(stored);
-}
-
-async function saveEntries(entries: LeaderboardEntry[]) {
-  await kv.set(KV_KEY, sortLeaderboard(entries));
-}
-
-function toLegacyScore(totalCorrect: number, averageTimePerNoteMs: number) {
-  if (!Number.isFinite(averageTimePerNoteMs) || averageTimePerNoteMs <= 0) {
-    return 0;
+  const token = authHeader.slice("Bearer ".length);
+  const supabase = getSupabaseServerClient();
+  if (!supabase) {
+    return null;
   }
-  return Math.max(1, Math.round((totalCorrect / averageTimePerNoteMs) * 100000));
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data.user) {
+    return null;
+  }
+  return data.user.id;
 }
 
-function parseEntryPayload(body: unknown): LeaderboardEntry | null {
+function parseEntryPayload(body: unknown) {
   if (typeof body !== "object" || body === null) {
     return null;
   }
   const payload = body as Record<string, unknown>;
-  const user = typeof payload.user === "string" ? payload.user : typeof payload.name === "string" ? payload.name : "";
-  const nameError = validateName(user);
+  const username = typeof payload.username === "string" ? payload.username : "";
+  const averageTimePerNoteMs = typeof payload.averageTimePerNoteMs === "number" ? payload.averageTimePerNoteMs : NaN;
+  const accuracy = typeof payload.accuracy === "number" ? payload.accuracy : NaN;
+
+  const nameError = validateUsername(username);
   if (nameError) {
-    return null;
+    return { error: nameError } as const;
   }
 
-  const mode: StoredMode = isMode(payload.mode) ? payload.mode : "unknown";
-  const difficulty: DifficultyTier = isDifficulty(payload.difficulty) ? payload.difficulty : "beginner";
-
-  let score = typeof payload.score === "number" ? payload.score : 0;
-  if (!Number.isFinite(score) || score <= 0) {
-    const totalCorrect = typeof payload.totalCorrect === "number" ? payload.totalCorrect : 0;
-    const averageTimePerNoteMs = typeof payload.averageTimePerNoteMs === "number" ? payload.averageTimePerNoteMs : 0;
-    score = toLegacyScore(totalCorrect, averageTimePerNoteMs);
+  if (!Number.isFinite(averageTimePerNoteMs) || averageTimePerNoteMs <= 0) {
+    return { error: "Average time is invalid." } as const;
   }
-
-  if (!Number.isFinite(score) || score <= 0) {
-    return null;
+  if (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 1) {
+    return { error: "Accuracy must be between 0 and 1." } as const;
   }
 
   return {
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    user: user.trim(),
-    score,
-    difficulty,
-    mode,
-    timestamp: Date.now()
-  };
+    username: username.trim(),
+    averageTimePerNoteMs,
+    accuracy
+  } as const;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const supabase = getSupabaseServerClient();
+  if (!supabase) {
+    res.status(500).json({ error: "Supabase is not configured." });
+    return;
+  }
+
   if (req.method === "GET") {
-    const entries = await getEntries();
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .select("user_id, username, average_time_per_note_ms, accuracy, updated_at")
+      .order("accuracy", { ascending: false })
+      .order("average_time_per_note_ms", { ascending: true })
+      .limit(MAX_ENTRIES);
+
+    if (error) {
+      res.status(500).json({ error: "Failed to load leaderboard." });
+      return;
+    }
+    const entries = (data ?? []) as LeaderboardEntry[];
     res.status(200).json({ entries });
     return;
   }
 
   if (req.method === "POST") {
-    const entry = parseEntryPayload(req.body);
-    if (!entry) {
-      res.status(400).json({ error: "Invalid leaderboard payload." });
-      return;
-    }
-
-    const entries = await getEntries();
-    const nextEntries = sortLeaderboard([...entries, entry]);
-    await saveEntries(nextEntries);
-    res.status(201).json({ entry, entries: nextEntries });
-    return;
-  }
-
-  if (req.method === "DELETE") {
-    const adminKey = req.headers["x-admin-key"];
-    const expected = process.env.LEADERBOARD_ADMIN_KEY;
-    if (!expected || adminKey !== expected) {
+    const userId = await getUserIdFromRequest(req);
+    if (!userId) {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
 
-    const id = typeof req.query.id === "string" ? req.query.id : "";
-    if (!id) {
-      res.status(400).json({ error: "Missing entry id" });
+    const payload = parseEntryPayload(req.body);
+    if (!payload || "error" in payload) {
+      res.status(400).json({ error: payload?.error ?? "Invalid leaderboard payload." });
       return;
     }
 
-    const entries = await getEntries();
-    const nextEntries = entries.filter((entry) => entry.id !== id);
-    if (nextEntries.length === entries.length) {
-      res.status(404).json({ error: "Entry not found" });
+    const { data: existingRows, error: fetchError } = await supabase
+      .from(TABLE_NAME)
+      .select("accuracy, average_time_per_note_ms")
+      .eq("user_id", userId)
+      .limit(1);
+    if (fetchError) {
+      res.status(500).json({ error: "Failed to evaluate existing leaderboard entry." });
       return;
     }
 
-    await saveEntries(nextEntries);
-    res.status(200).json({ entries: nextEntries });
+    const existing = existingRows?.[0] as { accuracy: number; average_time_per_note_ms: number } | undefined;
+    const isBetter =
+      !existing ||
+      payload.accuracy > existing.accuracy ||
+      (payload.accuracy === existing.accuracy && payload.averageTimePerNoteMs < existing.average_time_per_note_ms);
+
+    if (isBetter) {
+      const { error: upsertError } = await supabase.from(TABLE_NAME).upsert(
+        {
+          user_id: userId,
+          username: payload.username,
+          average_time_per_note_ms: payload.averageTimePerNoteMs,
+          accuracy: payload.accuracy
+        },
+        { onConflict: "user_id" }
+      );
+      if (upsertError) {
+        res.status(500).json({ error: "Failed to save leaderboard entry." });
+        return;
+      }
+    }
+
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .select("user_id, username, average_time_per_note_ms, accuracy, updated_at")
+      .order("accuracy", { ascending: false })
+      .order("average_time_per_note_ms", { ascending: true })
+      .limit(MAX_ENTRIES);
+    if (error) {
+      res.status(500).json({ error: "Failed to refresh leaderboard." });
+      return;
+    }
+
+    res.status(201).json({ entries: data ?? [], updated: isBetter });
     return;
   }
 
