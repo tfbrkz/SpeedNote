@@ -3,7 +3,7 @@ import type { NoteLetter } from "../lib/noteGenerator";
 type AnswerButtonsProps = {
   disabled: boolean;
   lastGuess: NoteLetter | null;
-  correctLetter: NoteLetter;
+  correctLetter: NoteLetter | null;
   revealAnswer: boolean;
   onAnswer: (letter: NoteLetter) => void;
 };
@@ -24,7 +24,7 @@ export function AnswerButtons({
       <div className="answers-panel">
       {LETTERS.map((letter) => {
         const guessedThis = revealAnswer && lastGuess === letter;
-        const isCorrect = revealAnswer && letter === correctLetter;
+        const isCorrect = revealAnswer && correctLetter !== null && letter === correctLetter;
         const className = guessedThis ? (isCorrect ? "correct" : "wrong") : isCorrect ? "correct" : "";
 
         return (

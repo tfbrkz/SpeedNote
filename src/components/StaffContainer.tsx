@@ -5,6 +5,9 @@ import type { NoteResultState } from "../hooks/useSpeedNoteSession";
 type StaffContainerProps = {
   notes: GeneratedNote[];
   activeNoteIndex: number;
+  gameRunning: boolean;
+  onStartStop: () => void;
+  showSolvedNoteLetters: boolean;
   feedbackMessage: string;
   feedbackClass: "neutral" | "success" | "error";
   showGrandStaff?: boolean;
@@ -18,6 +21,9 @@ type StaffContainerProps = {
 export function StaffContainer({
   notes,
   activeNoteIndex,
+  gameRunning,
+  onStartStop,
+  showSolvedNoteLetters,
   feedbackMessage,
   feedbackClass,
   showGrandStaff = false,
@@ -33,6 +39,9 @@ export function StaffContainer({
         <StaffDisplay
           notes={notes}
           activeNoteIndex={activeNoteIndex}
+          gameRunning={gameRunning}
+          onStartStop={onStartStop}
+          showSolvedNoteLetters={showSolvedNoteLetters}
           showGrandStaff={showGrandStaff}
           noteResults={noteResults}
           rhythmModeEnabled={rhythmModeEnabled}

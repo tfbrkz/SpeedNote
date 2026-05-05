@@ -207,7 +207,7 @@ summary:focus-visible {
 
 .score-panel {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.6rem;
 }
 
@@ -277,6 +277,13 @@ summary:focus-visible {
 .staff-header h2 {
   margin: 0;
   font-size: 1.03rem;
+}
+
+.staff-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
 }
 
 .staff-header p {
@@ -525,15 +532,12 @@ summary:focus-visible {
 
 .settings-panel {
   margin: 0;
-  padding: 0.4rem 0.9rem 0.85rem;
+  padding: 0.8rem 0.9rem 0.85rem;
 }
 
-.settings-panel summary {
-  cursor: pointer;
-  font-weight: 700;
-  color: var(--text-primary);
-  padding: 0.5rem 0;
-  user-select: none;
+.settings-panel h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1rem;
 }
 
 .settings-group {
@@ -765,7 +769,7 @@ summary:focus-visible {
   }
 
   .score-panel {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -797,10 +801,6 @@ summary:focus-visible {
 
   .session-row span {
     width: max-content;
-  }
-
-  .score-panel {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .answers-panel {

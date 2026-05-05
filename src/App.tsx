@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { AnswerButtons } from "./components/AnswerButtons";
 import { InputController } from "./components/InputController";
+import { ScoreTracker } from "./components/ScoreTracker";
 import { StaffContainer } from "./components/StaffContainer";
-import { StatDashboard } from "./components/StatDashboard";
 import { useMidi } from "./providers/midiContext";
 import { useSpeedNoteSession } from "./hooks/useSpeedNoteSession";
 import { supabase } from "./lib/supabaseClient";
@@ -64,11 +64,10 @@ type LeaderboardEntry = {
   updated_at: string;
 };
 
-type AppTab = "game" | "settings" | "leaderboard";
+type AppTab = "game" | "settings";
 
 function App() {
   const [activeTab, setActiveTab] = useState<AppTab>("game");
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const { status: midiStatus, errorMessage: midiErrorMessage, subscribeNoteOn } = useMidi();
   const { state, actions } = useSpeedNoteSession();
   const [session, setSession] = useState<Session | null>(null);
@@ -323,34 +322,18 @@ function App() {
             >
               Instructions & Settings
             </button>
-            <button
-              type="button"
-              className={activeTab === "leaderboard" ? "active" : ""}
-              onClick={() => setActiveTab("leaderboard")}
-            >
-              Leaderboard
-            </button>
           </nav>
         </header>
 
         {activeTab === "game" && (
           <>
-        <StatDashboard
-          streak={state.streak}
-          correct={state.correct}
-          incorrect={state.incorrect}
-          currentNoteElapsedMs={state.currentNoteElapsedMs}
-          averageResponseMs={state.averageResponseMs}
-          gameRunning={state.gameRunning}
-          completedSets={state.completedSets}
-          numberOfSets={state.numberOfSets}
-          onStartStop={handleStartStop}
-        />
-
         <section className="training-stack">
           <StaffContainer
             notes={state.currentNotes}
             activeNoteIndex={state.currentNoteIndex}
+            gameRunning={state.gameRunning}
+            onStartStop={handleStartStop}
+            showSolvedNoteLetters={state.showSolvedNoteLetters}
             feedbackMessage={state.feedback.message}
             feedbackClass={state.feedbackClass}
             showGrandStaff={state.mode === "mixed"}
@@ -363,10 +346,106 @@ function App() {
           <AnswerButtons
             disabled={state.locked || !state.gameRunning}
             lastGuess={state.feedback.lastGuess}
-            correctLetter={state.currentTargetNote.letter}
+            correctLetter={state.feedback.expectedLetter}
             revealAnswer={state.feedback.revealAnswer}
             onAnswer={actions.handleAnswer}
           />
+          <ScoreTracker correct={state.correct} incorrect={state.incorrect} />
+        </section>
+        <section className="leaderboard-submit">
+          <h3>Account</h3>
+          {session && user ? (
+            <div className="auth-panel">
+              <p>Logged in as {user.email}</p>
+              <div className="leaderboard-submit-row">
+                <input
+                  type="text"
+                  placeholder="Leaderboard username"
+                  value={authUsername}
+                  onChange={(event) => setAuthUsername(event.target.value)}
+                  autoComplete="nickname"
+                />
+                <button type="button" onClick={() => void handleUsernameSave()} disabled={authBusy || !authUsername.trim()}>
+                  Save alias
+                </button>
+              </div>
+              <button type="button" className="session-btn" onClick={() => void handleLogout()}>
+                Log out
+              </button>
+            </div>
+          ) : (
+            <div className="auth-panel">
+              <p>Sign in or create an account to auto-submit leaderboard runs.</p>
+              <div className="leaderboard-submit-row">
+                <input
+                  type="text"
+                  placeholder="Username (public alias)"
+                  value={authUsername}
+                  onChange={(event) => setAuthUsername(event.target.value)}
+                  autoComplete="nickname"
+                />
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  autoComplete="email"
+                />
+                <input
+                  type="password"
+                  placeholder="Password"
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  autoComplete="current-password"
+                />
+              </div>
+              <div className="leaderboard-submit-row">
+                <button type="button" onClick={() => void handleAuthLogin()} disabled={authBusy || !authEmail || !authPassword}>
+                  Log in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleAuthSignup()}
+                  disabled={authBusy || !authUsername.trim() || !authEmail || !authPassword}
+                >
+                  Sign up
+                </button>
+              </div>
+              {authError && <p className="leaderboard-error">{authError}</p>}
+            </div>
+          )}
+          {state.roundEnded && state.leaderboardMode && (
+            <p>
+              {session
+                ? "Run complete. Your leaderboard result is submitted automatically."
+                : "Run complete. Log in to auto-submit your result."}
+            </p>
+          )}
+        </section>
+
+        <section className="leaderboard-panel" aria-label="Leaderboard">
+          <div className="leaderboard-header-row">
+            <h3>Leaderboard</h3>
+          </div>
+          {leaderboardApiError && <p className="leaderboard-error">{leaderboardApiError}</p>}
+          {sortedLeaderboard.length === 0 ? (
+            <p className="leaderboard-empty">No scores submitted yet.</p>
+          ) : (
+            <div className="leaderboard-table">
+              <div className="leaderboard-row leaderboard-header">
+                <span>Username</span>
+                <span>Average time / note</span>
+                <span>Accuracy</span>
+              </div>
+              {sortedLeaderboard.map((entry) => (
+                <div key={entry.user_id} className="leaderboard-row compact">
+                  <span>{entry.username}</span>
+                  <span>{(entry.average_time_per_note_ms / 1000).toFixed(2)}s</span>
+                  <span>{(entry.accuracy * 100).toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
           </>
         )}
@@ -387,10 +466,10 @@ function App() {
               practiceMode={state.practiceMode}
               notesPerSet={state.notesPerSet}
               numberOfSets={state.numberOfSets}
-              settingsOpen={settingsOpen}
               midiStatus={midiErrorMessage ? `error (${midiErrorMessage})` : midiStatus}
               rhythmModeEnabled={state.rhythmModeEnabled}
               rhythmMsPerNote={state.rhythmMsPerNote}
+              showSolvedNoteLetters={state.showSolvedNoteLetters}
               onModeChange={actions.onModeChange}
               onDifficultyChange={actions.onDifficultyChange}
               onPracticeModeChange={actions.onPracticeModeChange}
@@ -399,110 +478,11 @@ function App() {
               onNotesPerSetChange={actions.onNotesPerSetChange}
               onNumberOfSetsChange={actions.onNumberOfSetsChange}
               onLeaderboardModeChange={actions.onLeaderboardModeChange}
-              onSettingsOpenChange={setSettingsOpen}
+              onShowSolvedNoteLettersChange={actions.onShowSolvedNoteLettersChange}
             />
           </section>
         )}
 
-        {activeTab === "leaderboard" && (
-          <section className="app-tab-panel">
-            <section className="leaderboard-submit">
-              <h3>Account</h3>
-              {session && user ? (
-                <div className="auth-panel">
-                  <p>Logged in as {user.email}</p>
-                  <div className="leaderboard-submit-row">
-                    <input
-                      type="text"
-                      placeholder="Leaderboard username"
-                      value={authUsername}
-                      onChange={(event) => setAuthUsername(event.target.value)}
-                      autoComplete="nickname"
-                    />
-                    <button type="button" onClick={() => void handleUsernameSave()} disabled={authBusy || !authUsername.trim()}>
-                      Save alias
-                    </button>
-                  </div>
-                  <button type="button" className="session-btn" onClick={() => void handleLogout()}>
-                    Log out
-                  </button>
-                </div>
-              ) : (
-                <div className="auth-panel">
-                  <p>Sign in or create an account to auto-submit leaderboard runs.</p>
-                  <div className="leaderboard-submit-row">
-                    <input
-                      type="text"
-                      placeholder="Username (public alias)"
-                      value={authUsername}
-                      onChange={(event) => setAuthUsername(event.target.value)}
-                      autoComplete="nickname"
-                    />
-                    <input
-                      type="email"
-                      placeholder="Email"
-                      value={authEmail}
-                      onChange={(event) => setAuthEmail(event.target.value)}
-                      autoComplete="email"
-                    />
-                    <input
-                      type="password"
-                      placeholder="Password"
-                      value={authPassword}
-                      onChange={(event) => setAuthPassword(event.target.value)}
-                      autoComplete="current-password"
-                    />
-                  </div>
-                  <div className="leaderboard-submit-row">
-                    <button type="button" onClick={() => void handleAuthLogin()} disabled={authBusy || !authEmail || !authPassword}>
-                      Log in
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleAuthSignup()}
-                      disabled={authBusy || !authUsername.trim() || !authEmail || !authPassword}
-                    >
-                      Sign up
-                    </button>
-                  </div>
-                  {authError && <p className="leaderboard-error">{authError}</p>}
-                </div>
-              )}
-              {state.roundEnded && state.leaderboardMode && (
-                <p>
-                  {session
-                    ? "Run complete. Your leaderboard result is submitted automatically."
-                    : "Run complete. Log in to auto-submit your result."}
-                </p>
-              )}
-            </section>
-
-            <section className="leaderboard-panel" aria-label="Leaderboard">
-              <div className="leaderboard-header-row">
-                <h3>Leaderboard</h3>
-              </div>
-              {leaderboardApiError && <p className="leaderboard-error">{leaderboardApiError}</p>}
-              {sortedLeaderboard.length === 0 ? (
-                <p className="leaderboard-empty">No scores submitted yet.</p>
-              ) : (
-                <div className="leaderboard-table">
-                  <div className="leaderboard-row leaderboard-header">
-                    <span>Username</span>
-                    <span>Average time / note</span>
-                    <span>Accuracy</span>
-                  </div>
-                  {sortedLeaderboard.map((entry) => (
-                    <div key={entry.user_id} className="leaderboard-row compact">
-                      <span>{entry.username}</span>
-                      <span>{(entry.average_time_per_note_ms / 1000).toFixed(2)}s</span>
-                      <span>{(entry.accuracy * 100).toFixed(1)}%</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          </section>
-        )}
       </section>
       <AdRail label="Right" slotId={ADSENSE_RIGHT_SLOT_ID} />
       <footer className="site-footer">Copyright &copy; 2026 SpeedNote Piano</footer>

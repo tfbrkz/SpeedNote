@@ -6,6 +6,9 @@ import type { NoteResultState } from "../hooks/useSpeedNoteSession";
 type StaffDisplayProps = {
   notes: GeneratedNote[];
   activeNoteIndex: number;
+  gameRunning: boolean;
+  onStartStop: () => void;
+  showSolvedNoteLetters: boolean;
   showGrandStaff?: boolean;
   noteResults?: NoteResultState[];
   rhythmModeEnabled?: boolean;
@@ -22,9 +25,35 @@ function renderClefLabel(clef: Clef) {
   return clef === "treble" ? "Treble Clef" : "Bass Clef";
 }
 
+function drawSolvedLetters(
+  context: ReturnType<Renderer["getContext"]>,
+  notes: GeneratedNote[],
+  staveNotes: Array<StaveNote | null>,
+  noteResults: NoteResultState[],
+  fixedY: number
+) {
+  context.save();
+  context.setFont("Arial", 12, "bold");
+  context.setFillStyle(CORRECT_NOTE_COLOR);
+  for (let index = 0; index < notes.length; index += 1) {
+    if (noteResults[index] !== "correct") {
+      continue;
+    }
+    const x = staveNotes[index]?.getAbsoluteX();
+    if (typeof x !== "number") {
+      continue;
+    }
+    context.fillText(notes[index].letter, x - 4, fixedY);
+  }
+  context.restore();
+}
+
 export function StaffDisplay({
   notes,
   activeNoteIndex,
+  gameRunning,
+  onStartStop,
+  showSolvedNoteLetters,
   showGrandStaff = false,
   noteResults = [],
   rhythmModeEnabled = false,
@@ -105,6 +134,9 @@ export function StaffDisplay({
       new Formatter().joinVoices([voice]).format([voice], Math.max(140, width - 120));
       voice.draw(context, stave);
       beams.forEach((beam) => beam.setContext(context).draw());
+      if (showSolvedNoteLetters) {
+        drawSolvedLetters(context, notes, staveNotes, noteResults, stave.getYForTopText(0) - 12);
+      }
       return;
     }
 
@@ -176,12 +208,23 @@ export function StaffDisplay({
       bassTickables.filter((tickable) => tickable instanceof StaveNote)
     );
     [...trebleBeams, ...bassBeams].forEach((beam) => beam.setContext(context).draw());
-  }, [activeNoteIndex, availableWidth, firstNote?.clef, noteResults, notes, showGrandStaff]);
+    if (showSolvedNoteLetters) {
+      const trebleStaveNotes = trebleTickables.map((tickable) => (tickable instanceof StaveNote ? tickable : null));
+      const bassStaveNotes = bassTickables.map((tickable) => (tickable instanceof StaveNote ? tickable : null));
+      drawSolvedLetters(context, notes, trebleStaveNotes, noteResults, trebleStave.getYForTopText(0) - 12);
+      drawSolvedLetters(context, notes, bassStaveNotes, noteResults, bassStave.getYForTopText(0) - 12);
+    }
+  }, [activeNoteIndex, availableWidth, firstNote?.clef, noteResults, notes, showGrandStaff, showSolvedNoteLetters]);
 
   return (
     <section className="staff-panel" aria-live="polite">
       <div className="staff-header">
-        <h2>Read these notes in order</h2>
+        <div className="staff-header-row">
+          <h2>Choose or type each note in order</h2>
+          <button type="button" className="session-btn" onClick={onStartStop}>
+            {gameRunning ? "Stop Session" : "Start Session"}
+          </button>
+        </div>
         <p>
           {(showGrandStaff || (notes.some((note) => note.clef === "treble") && notes.some((note) => note.clef === "bass")))
             ? "Treble + Bass"

@@ -15,7 +15,9 @@ import { playPianoNote, warmPianoSamples } from "../lib/pianoPlayer";
 export type FeedbackState = {
   revealAnswer: boolean;
   lastGuess: NoteLetter | null;
+  expectedLetter: NoteLetter | null;
   message: string;
+  tone: "neutral" | "success" | "error";
 };
 
 export type NoteResultState = "pending" | "correct" | "wrong";
@@ -52,6 +54,7 @@ export type SpeedNoteSessionState = {
   scanWindowWidth: number;
   countdownValue: number | null;
   rhythmMsPerNote: number;
+  showSolvedNoteLetters: boolean;
 };
 
 const DEFAULT_MODE: ClefMode = "treble";
@@ -86,9 +89,10 @@ export function useSpeedNoteSession() {
   const [mode, setMode] = useState<ClefMode>(DEFAULT_MODE);
   const [difficulty, setDifficulty] = useState<DifficultyTier>(DEFAULT_DIFFICULTY);
   const [practiceMode, setPracticeMode] = useState<PracticeMode>(DEFAULT_PRACTICE_MODE);
-  const [leaderboardMode, setLeaderboardMode] = useState(false);
+  const [leaderboardMode, setLeaderboardMode] = useState(true);
   const [rhythmModeEnabled, setRhythmModeEnabled] = useState(false);
   const [rhythmMsPerNote, setRhythmMsPerNote] = useState(DEFAULT_RHYTHM_MS_PER_NOTE);
+  const [showSolvedNoteLetters, setShowSolvedNoteLetters] = useState(true);
   const [gameRunning, setGameRunning] = useState(false);
   const [numberOfSets, setNumberOfSets] = useState(DEFAULT_NUMBER_OF_SETS);
   const [completedSets, setCompletedSets] = useState(0);
@@ -113,7 +117,9 @@ export function useSpeedNoteSession() {
   const [feedback, setFeedback] = useState<FeedbackState>({
     revealAnswer: false,
     lastGuess: null,
-    message: "Press Start to begin."
+    expectedLetter: null,
+    message: "Press Start to begin.",
+    tone: "neutral"
   });
 
   const generator = useMemo(() => createNoteGenerator(DIFFICULTY_CONFIGS[difficulty]), [difficulty]);
@@ -164,7 +170,9 @@ export function useSpeedNoteSession() {
       setFeedback({
         revealAnswer: false,
         lastGuess: null,
-        message: "Pick the letter name for this note."
+        expectedLetter: null,
+        message: "Pick the letter name for this note.",
+        tone: "neutral"
       });
     },
     [clearQueuedNextSet, generator, missCountByPitch]
@@ -204,7 +212,9 @@ export function useSpeedNoteSession() {
       setFeedback({
         revealAnswer: false,
         lastGuess: null,
-        message
+        expectedLetter: null,
+        message,
+        tone: "neutral"
       });
     },
     [clearCountdown, clearQueuedNextSet, difficulty, missCountByPitch, mode, notesPerSet, numberOfSets]
@@ -230,7 +240,9 @@ export function useSpeedNoteSession() {
     setFeedback({
       revealAnswer: false,
       lastGuess: null,
-      message: "Get ready..."
+      expectedLetter: null,
+      message: "Get ready...",
+      tone: "neutral"
     });
     countdownIntervalRef.current = window.setInterval(() => {
       setCountdownValue((current) => {
@@ -251,7 +263,9 @@ export function useSpeedNoteSession() {
           setFeedback({
             revealAnswer: false,
             lastGuess: null,
-            message: "Pick the letter name for this note."
+            expectedLetter: null,
+            message: "Pick the letter name for this note.",
+            tone: "neutral"
           });
           return null;
         }
@@ -301,7 +315,9 @@ export function useSpeedNoteSession() {
         setFeedback({
           revealAnswer: true,
           lastGuess,
-          message: "Out of time window. Wait until the scan bar covers the note."
+          expectedLetter: currentTargetNote.letter,
+          message: "Out of time window. Wait until the scan bar covers the note.",
+          tone: "error"
         });
         return;
       }
@@ -340,11 +356,13 @@ export function useSpeedNoteSession() {
         setFeedback({
           revealAnswer: true,
           lastGuess,
+          expectedLetter: currentTargetNote.letter,
           message: options?.timedOut
             ? `Missed timing window. Expected ${currentTargetNote.letter}. Continue to note ${currentNoteIndex + 2} of ${currentNotes.length}.`
             : isCorrect
               ? `Correct. Now identify note ${currentNoteIndex + 2} of ${currentNotes.length}.`
-              : `Incorrect. Expected ${currentTargetNote.letter}. Continue to note ${currentNoteIndex + 2} of ${currentNotes.length}.`
+              : `Incorrect. Expected ${currentTargetNote.letter}. Continue to note ${currentNoteIndex + 2} of ${currentNotes.length}.`,
+          tone: isCorrect ? "success" : "error"
         });
         return;
       }
@@ -359,9 +377,11 @@ export function useSpeedNoteSession() {
         setFeedback({
           revealAnswer: true,
           lastGuess,
+          expectedLetter: currentTargetNote.letter,
           message: options?.timedOut
             ? `Set complete with mistakes (${nextCompletedSets}/${numberOfSets}) due to missed timing.`
-            : `Set complete with mistakes (${nextCompletedSets}/${numberOfSets}).`
+            : `Set complete with mistakes (${nextCompletedSets}/${numberOfSets}).`,
+          tone: "error"
         });
       } else {
         setCorrect((value) => value + 1);
@@ -369,7 +389,9 @@ export function useSpeedNoteSession() {
         setFeedback({
           revealAnswer: true,
           lastGuess,
-          message: `Perfect set complete (${nextCompletedSets}/${numberOfSets}).`
+          expectedLetter: currentTargetNote.letter,
+          message: `Perfect set complete (${nextCompletedSets}/${numberOfSets}).`,
+          tone: "success"
         });
       }
 
@@ -503,6 +525,10 @@ export function useSpeedNoteSession() {
     [resetSessionState]
   );
 
+  const onShowSolvedNoteLettersChange = useCallback((enabled: boolean) => {
+    setShowSolvedNoteLetters(enabled);
+  }, []);
+
   useEffect(() => {
     if (locked || !gameRunning) {
       return;
@@ -518,7 +544,9 @@ export function useSpeedNoteSession() {
             setFeedback({
               revealAnswer: true,
               lastGuess: null,
-              message: "Sprint complete. Time is up."
+              expectedLetter: null,
+              message: "Sprint complete. Time is up.",
+              tone: "error"
             });
           }
           return next;
@@ -565,11 +593,7 @@ export function useSpeedNoteSession() {
   const accuracyPercent = totalNotesAnswered > 0 ? (correctNotesAnswered / totalNotesAnswered) * 100 : 0;
   const roundEnded = !gameRunning && completedSets >= numberOfSets;
   const leaderboardEligible = leaderboardMode && roundEnded;
-  const feedbackClass: "neutral" | "success" | "error" = !feedback.revealAnswer
-    ? "neutral"
-    : feedback.lastGuess === currentTargetNote?.letter
-      ? "success"
-      : "error";
+  const feedbackClass: "neutral" | "success" | "error" = feedback.tone;
 
   return {
     state: {
@@ -603,7 +627,8 @@ export function useSpeedNoteSession() {
       scanProgress,
       scanWindowWidth: RHYTHM_SCAN_WINDOW_WIDTH,
       countdownValue,
-      rhythmMsPerNote
+      rhythmMsPerNote,
+      showSolvedNoteLetters
     } satisfies SpeedNoteSessionState,
     actions: {
       start,
@@ -617,7 +642,8 @@ export function useSpeedNoteSession() {
       onRhythmSpeedChange,
       onNotesPerSetChange,
       onNumberOfSetsChange,
-      onLeaderboardModeChange
+      onLeaderboardModeChange,
+      onShowSolvedNoteLettersChange
     }
   };
 }

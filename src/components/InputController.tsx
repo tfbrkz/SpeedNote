@@ -20,10 +20,10 @@ type InputControllerProps = {
   practiceMode: PracticeMode;
   notesPerSet: number;
   numberOfSets: number;
-  settingsOpen: boolean;
   midiStatus: string;
   rhythmModeEnabled: boolean;
   rhythmMsPerNote: number;
+  showSolvedNoteLetters: boolean;
   onModeChange: (mode: ClefMode) => void;
   onDifficultyChange: (difficulty: DifficultyTier) => void;
   onPracticeModeChange: (practiceMode: PracticeMode) => void;
@@ -32,7 +32,7 @@ type InputControllerProps = {
   onNotesPerSetChange: (count: number) => void;
   onNumberOfSetsChange: (count: number) => void;
   onLeaderboardModeChange: (enabled: boolean) => void;
-  onSettingsOpenChange: (open: boolean) => void;
+  onShowSolvedNoteLettersChange: (enabled: boolean) => void;
 };
 
 export function InputController({
@@ -43,10 +43,10 @@ export function InputController({
   practiceMode,
   notesPerSet,
   numberOfSets,
-  settingsOpen,
   midiStatus,
   rhythmModeEnabled,
   rhythmMsPerNote,
+  showSolvedNoteLetters,
   onModeChange,
   onDifficultyChange,
   onPracticeModeChange,
@@ -55,13 +55,13 @@ export function InputController({
   onNotesPerSetChange,
   onNumberOfSetsChange,
   onLeaderboardModeChange,
-  onSettingsOpenChange
+  onShowSolvedNoteLettersChange
 }: InputControllerProps) {
   const controlsLocked = gameRunning || leaderboardMode;
 
   return (
-    <details className="settings-panel" open={settingsOpen} onToggle={(event) => onSettingsOpenChange(event.currentTarget.open)}>
-      <summary>Training Settings {settingsOpen ? "▼" : "▶"}</summary>
+    <section className="settings-panel" aria-label="Training settings">
+      <h3>Training Settings</h3>
 
       <div className="settings-group" aria-label="Leaderboard mode">
         <p className="settings-label">Leaderboard mode</p>
@@ -74,6 +74,21 @@ export function InputController({
             disabled={gameRunning}
           >
             {leaderboardMode ? "Enabled" : "Disabled"}
+          </button>
+        </nav>
+      </div>
+
+      <div className="settings-group" aria-label="Solved note letters">
+        <p className="settings-label">Solved note letters</p>
+        <p className="settings-description">Show the solved letter above notes after correct answers.</p>
+        <nav className="mode-row">
+          <button
+            type="button"
+            onClick={() => onShowSolvedNoteLettersChange(!showSolvedNoteLetters)}
+            className={showSolvedNoteLetters ? "active" : ""}
+            disabled={gameRunning}
+          >
+            {showSolvedNoteLetters ? "Enabled" : "Disabled"}
           </button>
         </nav>
       </div>
@@ -192,6 +207,6 @@ export function InputController({
         </div>
 
       <p className="midi-status">MIDI: {midiStatus}</p>
-    </details>
+    </section>
   );
 }
