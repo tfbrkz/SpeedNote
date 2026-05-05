@@ -637,6 +637,21 @@ summary:focus-visible {
   margin-bottom: 0.6rem;
 }
 
+.leaderboard-dev-btn {
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: rgba(10, 13, 27, 0.8);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.72rem;
+}
+
+.leaderboard-dev-btn:hover {
+  transform: translateY(-1px);
+}
+
 .leaderboard-filter {
   display: flex;
   align-items: center;

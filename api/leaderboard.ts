@@ -120,7 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       accuracy: payload.accuracy
     });
     if (insertError) {
-      res.status(500).json({ error: "Failed to save leaderboard entry." });
+      res.status(500).json({ error: "Failed to save leaderboard entry.", details: insertError.message });
       return;
     }
 

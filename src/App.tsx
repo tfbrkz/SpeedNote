@@ -63,6 +63,25 @@ type LeaderboardEntry = {
 };
 
 type AppTab = "game" | "settings";
+const IS_LOCAL_DEV = import.meta.env.DEV;
+
+function buildDummyLeaderboardEntries(): LeaderboardEntry[] {
+  const now = Date.now();
+  const rows = [
+    { username: "Aria", average_time_per_note_ms: 980, accuracy: 0.98 },
+    { username: "Max", average_time_per_note_ms: 1120, accuracy: 0.95 },
+    { username: "Noah", average_time_per_note_ms: 1240, accuracy: 0.92 },
+    { username: "Mia", average_time_per_note_ms: 1320, accuracy: 0.9 },
+    { username: "Eli", average_time_per_note_ms: 1460, accuracy: 0.86 }
+  ];
+  return rows.map((entry, index) => ({
+    user_id: `local-demo-${index}`,
+    username: entry.username,
+    average_time_per_note_ms: entry.average_time_per_note_ms,
+    accuracy: entry.accuracy,
+    updated_at: new Date(now - index * 60000).toISOString()
+  }));
+}
 
 function App() {
   const [activeTab, setActiveTab] = useState<AppTab>("game");
@@ -117,11 +136,17 @@ function App() {
         if (cancelled) {
           return;
         }
-        setLeaderboardEntries(Array.isArray(data.entries) ? data.entries : []);
+        const entries = Array.isArray(data.entries) ? data.entries : [];
+        setLeaderboardEntries(entries.length > 0 ? entries : IS_LOCAL_DEV ? buildDummyLeaderboardEntries() : []);
         setLeaderboardApiError(null);
       } catch {
         if (!cancelled) {
-          setLeaderboardApiError("Leaderboard service unavailable.");
+          if (IS_LOCAL_DEV) {
+            setLeaderboardEntries(buildDummyLeaderboardEntries());
+            setLeaderboardApiError(null);
+          } else {
+            setLeaderboardApiError("Leaderboard service unavailable.");
+          }
         }
       }
     })();
@@ -214,6 +239,11 @@ function App() {
     }
   }, [state.accuracyPercent, state.averageResponseMs, submissionUsername]);
 
+  const handleSeedLocalLeaderboard = useCallback(() => {
+    setLeaderboardEntries(buildDummyLeaderboardEntries());
+    setLeaderboardApiError(null);
+  }, []);
+
   return (
     <main className="page-layout">
       <AdRail label="Left" slotId={ADSENSE_LEFT_SLOT_ID} />
@@ -267,13 +297,18 @@ function App() {
         <section className="leaderboard-panel" aria-label="Leaderboard">
           <div className="leaderboard-header-row">
             <h3>Leaderboard</h3>
+            {IS_LOCAL_DEV && (
+              <button type="button" className="leaderboard-dev-btn" onClick={handleSeedLocalLeaderboard}>
+                Load demo rows
+              </button>
+            )}
           </div>
           {leaderboardApiError && <p className="leaderboard-error">{leaderboardApiError}</p>}
           {sortedLeaderboard.length === 0 ? (
             <p className="leaderboard-empty">No scores submitted yet.</p>
           ) : (
             <div className="leaderboard-table">
-              <div className="leaderboard-row leaderboard-header">
+              <div className="leaderboard-row leaderboard-header compact">
                 <span>Username</span>
                 <span>Average time / note</span>
                 <span>Accuracy</span>
