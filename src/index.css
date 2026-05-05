@@ -733,6 +733,36 @@ summary:focus-visible {
   color: var(--text-muted);
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.72);
+  display: grid;
+  place-items: center;
+  z-index: 200;
+  padding: 1rem;
+}
+
+.leaderboard-modal {
+  width: min(480px, 100%);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(32, 43, 77, 0.96), rgba(17, 20, 38, 0.98));
+  box-shadow: var(--shadow-soft);
+  padding: 1rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.leaderboard-modal h3 {
+  margin: 0;
+}
+
+.leaderboard-modal p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
 @keyframes floatIn {
   from {
     opacity: 0;

@@ -1,4 +1,5 @@
 import { Profanity } from "@2toad/profanity";
+import { randomUUID } from "node:crypto";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 
@@ -51,23 +52,6 @@ function validateUsername(username: string) {
   }
 
   return null;
-}
-
-async function getUserIdFromRequest(req: VercelRequest) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    return null;
-  }
-  const token = authHeader.slice("Bearer ".length);
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return null;
-  }
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data.user) {
-    return null;
-  }
-  return data.user.id;
 }
 
 function parseEntryPayload(body: unknown) {
@@ -123,48 +107,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === "POST") {
-    const userId = await getUserIdFromRequest(req);
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-
     const payload = parseEntryPayload(req.body);
     if (!payload || "error" in payload) {
       res.status(400).json({ error: payload?.error ?? "Invalid leaderboard payload." });
       return;
     }
 
-    const { data: existingRows, error: fetchError } = await supabase
-      .from(TABLE_NAME)
-      .select("accuracy, average_time_per_note_ms")
-      .eq("user_id", userId)
-      .limit(1);
-    if (fetchError) {
-      res.status(500).json({ error: "Failed to evaluate existing leaderboard entry." });
+    const { error: insertError } = await supabase.from(TABLE_NAME).insert({
+      user_id: randomUUID(),
+      username: payload.username,
+      average_time_per_note_ms: payload.averageTimePerNoteMs,
+      accuracy: payload.accuracy
+    });
+    if (insertError) {
+      res.status(500).json({ error: "Failed to save leaderboard entry." });
       return;
-    }
-
-    const existing = existingRows?.[0] as { accuracy: number; average_time_per_note_ms: number } | undefined;
-    const isBetter =
-      !existing ||
-      payload.accuracy > existing.accuracy ||
-      (payload.accuracy === existing.accuracy && payload.averageTimePerNoteMs < existing.average_time_per_note_ms);
-
-    if (isBetter) {
-      const { error: upsertError } = await supabase.from(TABLE_NAME).upsert(
-        {
-          user_id: userId,
-          username: payload.username,
-          average_time_per_note_ms: payload.averageTimePerNoteMs,
-          accuracy: payload.accuracy
-        },
-        { onConflict: "user_id" }
-      );
-      if (upsertError) {
-        res.status(500).json({ error: "Failed to save leaderboard entry." });
-        return;
-      }
     }
 
     const { data, error } = await supabase
@@ -178,7 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    res.status(201).json({ entries: data ?? [], updated: isBetter });
+    res.status(201).json({ entries: data ?? [] });
     return;
   }
 

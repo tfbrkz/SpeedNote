@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Session, User } from "@supabase/supabase-js";
 import { AnswerButtons } from "./components/AnswerButtons";
 import { InputController } from "./components/InputController";
 import { ScoreTracker } from "./components/ScoreTracker";
 import { StaffContainer } from "./components/StaffContainer";
 import { useMidi } from "./providers/midiContext";
 import { useSpeedNoteSession } from "./hooks/useSpeedNoteSession";
-import { supabase } from "./lib/supabaseClient";
 import { type NoteLetter } from "./lib/noteGenerator";
 
 const LEADERBOARD_MAX_ENTRIES = 100;
@@ -70,16 +68,13 @@ function App() {
   const [activeTab, setActiveTab] = useState<AppTab>("game");
   const { status: midiStatus, errorMessage: midiErrorMessage, subscribeNoteOn } = useMidi();
   const { state, actions } = useSpeedNoteSession();
-  const [session, setSession] = useState<Session | null>(null);
-  const [user, setUser] = useState<User | null>(null);
-  const [authUsername, setAuthUsername] = useState("");
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
-  const [authBusy, setAuthBusy] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
   const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([]);
   const [leaderboardApiError, setLeaderboardApiError] = useState<string | null>(null);
-  const [lastAutoSubmittedSignature, setLastAutoSubmittedSignature] = useState<string | null>(null);
+  const [lastLeaderboardPromptSignature, setLastLeaderboardPromptSignature] = useState<string | null>(null);
+  const [showLeaderboardSubmitModal, setShowLeaderboardSubmitModal] = useState(false);
+  const [submissionUsername, setSubmissionUsername] = useState("");
+  const [submissionBusy, setSubmissionBusy] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -109,25 +104,6 @@ function App() {
       actions.handleMidiAnswer(noteNumber);
     });
   }, [actions, state.gameRunning, state.locked, subscribeNoteOn]);
-
-  useEffect(() => {
-    void supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
-      const existingUsername = data.session?.user?.user_metadata?.username;
-      setAuthUsername(typeof existingUsername === "string" ? existingUsername : "");
-    });
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event: string, nextSession: Session | null) => {
-      setSession(nextSession);
-      setUser(nextSession?.user ?? null);
-      setAuthError(null);
-      const existingUsername = nextSession?.user?.user_metadata?.username;
-      setAuthUsername(typeof existingUsername === "string" ? existingUsername : "");
-    });
-    return () => {
-      subscription.subscription.unsubscribe();
-    };
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,130 +153,66 @@ function App() {
   }, [actions, state.gameRunning]);
 
   useEffect(() => {
-    if (!session?.access_token || !user || !state.roundEnded || !state.leaderboardMode || !state.leaderboardEligible) {
+    if (!state.roundEnded || !state.leaderboardMode || !state.leaderboardEligible) {
       return;
     }
     if (state.averageResponseMs <= 0 || state.totalNotesAnswered <= 0) {
       return;
     }
-    const signature = `${user.id}:${state.completedSets}:${state.correctNotesAnswered}:${state.totalNotesAnswered}:${state.averageResponseMs}`;
-    if (signature === lastAutoSubmittedSignature) {
+    const signature = `${state.completedSets}:${state.correctNotesAnswered}:${state.totalNotesAnswered}:${state.averageResponseMs}`;
+    if (signature === lastLeaderboardPromptSignature) {
       return;
     }
-
-    void (async () => {
-      try {
-        const username = (user.user_metadata?.username as string | undefined)?.trim();
-        if (!username) {
-          setLeaderboardApiError("Set a leaderboard username in your account section.");
-          return;
-        }
-        const response = await fetch("/api/leaderboard", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`
-          },
-          body: JSON.stringify({
-            username,
-            averageTimePerNoteMs: state.averageResponseMs,
-            accuracy: state.accuracyPercent / 100
-          })
-        });
-
-        if (!response.ok) {
-          const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
-          setLeaderboardApiError(errorPayload?.error ?? "Failed to submit leaderboard run.");
-          return;
-        }
-
-        const payload = (await response.json()) as { entries?: LeaderboardEntry[] };
-        setLeaderboardEntries(Array.isArray(payload.entries) ? payload.entries : []);
-        setLastAutoSubmittedSignature(signature);
-        setLeaderboardApiError(null);
-      } catch {
-        setLeaderboardApiError("Failed to submit leaderboard run.");
-      }
-    })();
+    setLastLeaderboardPromptSignature(signature);
+    setShowLeaderboardSubmitModal(true);
+    setSubmissionError(null);
   }, [
-    lastAutoSubmittedSignature,
-    session?.access_token,
-    state.accuracyPercent,
+    lastLeaderboardPromptSignature,
     state.averageResponseMs,
     state.completedSets,
     state.correctNotesAnswered,
     state.leaderboardEligible,
     state.leaderboardMode,
     state.roundEnded,
-    state.totalNotesAnswered,
-    user
+    state.totalNotesAnswered
   ]);
 
-  const handleAuthSignup = useCallback(async () => {
-    const trimmedUsername = authUsername.trim();
+  const handleSubmitLeaderboardScore = useCallback(async () => {
+    const trimmedUsername = submissionUsername.trim();
     if (!trimmedUsername) {
-      setAuthError("Please choose a username.");
+      setSubmissionError("Please enter a username.");
       return;
     }
-    setAuthBusy(true);
-    setAuthError(null);
-    const { error } = await supabase.auth.signUp({
-      email: authEmail,
-      password: authPassword,
-      options: {
-        data: {
-          username: trimmedUsername
-        }
+    setSubmissionBusy(true);
+    setSubmissionError(null);
+    try {
+      const response = await fetch("/api/leaderboard", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          username: trimmedUsername,
+          averageTimePerNoteMs: state.averageResponseMs,
+          accuracy: state.accuracyPercent / 100
+        })
+      });
+      if (!response.ok) {
+        const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
+        setSubmissionError(errorPayload?.error ?? "Failed to submit leaderboard run.");
+        setSubmissionBusy(false);
+        return;
       }
-    });
-    setAuthBusy(false);
-    if (error) {
-      setAuthError(error.message);
-      return;
+      const payload = (await response.json()) as { entries?: LeaderboardEntry[] };
+      setLeaderboardEntries(Array.isArray(payload.entries) ? payload.entries : []);
+      setLeaderboardApiError(null);
+      setShowLeaderboardSubmitModal(false);
+      setSubmissionBusy(false);
+    } catch {
+      setSubmissionError("Failed to submit leaderboard run.");
+      setSubmissionBusy(false);
     }
-    setAuthPassword("");
-  }, [authEmail, authPassword, authUsername]);
-
-  const handleAuthLogin = useCallback(async () => {
-    setAuthBusy(true);
-    setAuthError(null);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: authEmail,
-      password: authPassword
-    });
-    setAuthBusy(false);
-    if (error) {
-      setAuthError(error.message);
-      return;
-    }
-    setAuthPassword("");
-  }, [authEmail, authPassword]);
-
-  const handleLogout = useCallback(async () => {
-    await supabase.auth.signOut();
-    setLastAutoSubmittedSignature(null);
-  }, []);
-
-  const handleUsernameSave = useCallback(async () => {
-    const trimmedUsername = authUsername.trim();
-    if (!trimmedUsername) {
-      setAuthError("Username cannot be empty.");
-      return;
-    }
-    setAuthBusy(true);
-    setAuthError(null);
-    const { error } = await supabase.auth.updateUser({
-      data: {
-        username: trimmedUsername
-      }
-    });
-    setAuthBusy(false);
-    if (error) {
-      setAuthError(error.message);
-      return;
-    }
-    setAuthUsername(trimmedUsername);
-  }, [authUsername]);
+  }, [state.accuracyPercent, state.averageResponseMs, submissionUsername]);
 
   return (
     <main className="page-layout">
@@ -352,77 +264,6 @@ function App() {
           />
           <ScoreTracker correct={state.correct} incorrect={state.incorrect} />
         </section>
-        <section className="leaderboard-submit">
-          <h3>Account</h3>
-          {session && user ? (
-            <div className="auth-panel">
-              <p>Logged in as {user.email}</p>
-              <div className="leaderboard-submit-row">
-                <input
-                  type="text"
-                  placeholder="Leaderboard username"
-                  value={authUsername}
-                  onChange={(event) => setAuthUsername(event.target.value)}
-                  autoComplete="nickname"
-                />
-                <button type="button" onClick={() => void handleUsernameSave()} disabled={authBusy || !authUsername.trim()}>
-                  Save alias
-                </button>
-              </div>
-              <button type="button" className="session-btn" onClick={() => void handleLogout()}>
-                Log out
-              </button>
-            </div>
-          ) : (
-            <div className="auth-panel">
-              <p>Sign in or create an account to auto-submit leaderboard runs.</p>
-              <div className="leaderboard-submit-row">
-                <input
-                  type="text"
-                  placeholder="Username (public alias)"
-                  value={authUsername}
-                  onChange={(event) => setAuthUsername(event.target.value)}
-                  autoComplete="nickname"
-                />
-                <input
-                  type="email"
-                  placeholder="Email"
-                  value={authEmail}
-                  onChange={(event) => setAuthEmail(event.target.value)}
-                  autoComplete="email"
-                />
-                <input
-                  type="password"
-                  placeholder="Password"
-                  value={authPassword}
-                  onChange={(event) => setAuthPassword(event.target.value)}
-                  autoComplete="current-password"
-                />
-              </div>
-              <div className="leaderboard-submit-row">
-                <button type="button" onClick={() => void handleAuthLogin()} disabled={authBusy || !authEmail || !authPassword}>
-                  Log in
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleAuthSignup()}
-                  disabled={authBusy || !authUsername.trim() || !authEmail || !authPassword}
-                >
-                  Sign up
-                </button>
-              </div>
-              {authError && <p className="leaderboard-error">{authError}</p>}
-            </div>
-          )}
-          {state.roundEnded && state.leaderboardMode && (
-            <p>
-              {session
-                ? "Run complete. Your leaderboard result is submitted automatically."
-                : "Run complete. Log in to auto-submit your result."}
-            </p>
-          )}
-        </section>
-
         <section className="leaderboard-panel" aria-label="Leaderboard">
           <div className="leaderboard-header-row">
             <h3>Leaderboard</h3>
@@ -486,6 +327,34 @@ function App() {
       </section>
       <AdRail label="Right" slotId={ADSENSE_RIGHT_SLOT_ID} />
       <footer className="site-footer">Copyright &copy; 2026 SpeedNote Piano</footer>
+      {showLeaderboardSubmitModal && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="leaderboard-modal" role="dialog" aria-modal="true" aria-label="Submit leaderboard score">
+            <h3>Submit leaderboard score</h3>
+            <p>Correct: {state.correctNotesAnswered}</p>
+            <p>Incorrect: {Math.max(0, state.totalNotesAnswered - state.correctNotesAnswered)}</p>
+            <p>Average speed per note: {(state.averageResponseMs / 1000).toFixed(2)}s</p>
+            <div className="leaderboard-submit-row">
+              <input
+                type="text"
+                placeholder="Pick a username"
+                value={submissionUsername}
+                onChange={(event) => setSubmissionUsername(event.target.value)}
+                autoComplete="nickname"
+              />
+            </div>
+            {submissionError && <p className="leaderboard-error">{submissionError}</p>}
+            <div className="leaderboard-submit-row">
+              <button type="button" onClick={() => void handleSubmitLeaderboardScore()} disabled={submissionBusy}>
+                {submissionBusy ? "Submitting..." : "Submit"}
+              </button>
+              <button type="button" onClick={() => setShowLeaderboardSubmitModal(false)} disabled={submissionBusy}>
+                Skip
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
